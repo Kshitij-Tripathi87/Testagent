@@ -1,0 +1,95 @@
+urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.raw_orders,PROD):
+  name: raw_orders
+  file: orders.raw_orders.csv
+  upstreams: []
+  columns:
+  - name: id
+    type: string
+    nullable: false
+  - name: customer_id
+    type: string
+    nullable: false
+  - name: amount
+    type: float
+    nullable: true
+  - name: order_ts
+    type: timestamp
+    nullable: false
+  owners:
+  - urn:oli:corpuser:data-team
+  glossary_terms:
+  - RawData
+  assertions: []
+urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.stg_orders,PROD):
+  name: stg_orders
+  file: orders.stg_orders.csv
+  upstreams:
+  - urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.raw_orders,PROD)
+  columns:
+  - name: id
+    type: string
+    nullable: false
+  - name: customer_id
+    type: string
+    nullable: false
+  - name: amount
+    type: float
+    nullable: false
+  - name: order_ts
+    type: timestamp
+    nullable: false
+  - name: cleaned_amount
+    type: float
+    nullable: true
+  owners:
+  - urn:oli:corpuser:data-team
+  glossary_terms:
+  - Staging
+  assertions: []
+urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.fact_orders,PROD):
+  name: fact_orders
+  file: orders.fact_orders.csv
+  upstreams:
+  - urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.stg_orders,PROD)
+  columns:
+  - name: id
+    type: string
+    nullable: false
+  - name: customer_id
+    type: string
+    nullable: false
+  - name: amount
+    type: float
+    nullable: true
+  - name: order_ts
+    type: timestamp
+    nullable: false
+  - name: tax
+    type: float
+    nullable: true
+  owners:
+  - urn:oli:corpuser:analytics-team
+  glossary_terms:
+  - FactTable
+  - Merchant
+  assertions: []
+urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.customer_ltv_features,PROD):
+  name: customer_ltv_features
+  file: customer_ltv_features.csv
+  upstreams:
+  - urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.fact_orders,PROD)
+  columns:
+  - name: customer_id
+    type: string
+    nullable: false
+  - name: ltv_score
+    type: float
+    nullable: true
+  - name: churn_risk
+    type: float
+    nullable: true
+  owners:
+  - urn:oli:corpuser:ml-team
+  glossary_terms:
+  - MLFeatureTable
+  assertions: []

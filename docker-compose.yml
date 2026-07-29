@@ -1,0 +1,109 @@
+# Local DataHub Quickstart
+#
+# Minimal stack for development and demo:
+#   - GMS (Metadata Service) on :8080
+#   - Frontend (UI) on :9002
+#   - MySQL (metadata store)
+#   - Elasticsearch (search index)
+#   - MAE / MCE (event consumers — lightweight profile for demo)
+#
+# Usage:
+#   docker compose -f docker-compose.yml up -d
+#   docker compose -f docker-compose.yml ps    # wait for all healthy
+#   # Then ingest sample data with:
+#   #   python scripts/ingest_to_datahub.py
+#
+# For full quickstart (Kafka, etc.) use the official compose file:
+#   https://github.com/datahub-project/datahub/blob/master/docker/quickstart/docker-compose.quickstart.yml
+
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: datahub
+      MYSQL_DATABASE: datahub
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pdatahub"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.18
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  datahub-gms:
+    image: acryldata/datahub-gms:v1.6.0
+    environment:
+      EBEAN_DATASOURCE_USERNAME: root
+      EBEAN_DATASOURCE_PASSWORD: datahub
+      EBEAN_DATASOURCE_HOST: mysql:3306
+      EBEAN_DATASOURCE_URL: jdbc:mysql://mysql:3306/datahub?useSSL=false&allowPublicKeyRetrieval=true
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: 9200
+      KAFKA_HOST: broker
+      KAFKA_PORT: 29092
+      # Use in-memory Kafka for lightweight demo
+      # Comment KAFKA_* lines above if using this mode:
+      # METADATA_CHANGE_EVENT_SYSTEM_TYPE: elasticsearch
+      DATAHUB_SERVER_TYPE: quickstart
+      DATAHUB_TELEMETRY_ENABLED: "false"
+      ENTITY_SERVICE_ENABLE_RETENTION: "false"
+      MAE_CONSUMER_ENABLED: "true"
+      MCE_CONSUMER_ENABLED: "true"
+      UI_INGESTION_ENABLED: "true"
+      # For local demo, generate a default token:
+      AUTH_OIDC_ENABLED: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+  datahub-frontend:
+    image: acryl/datahub-datahub-frontend-react:v1.56.0
+    environment:
+      - DATAHUB_GMS_HOST=datahub-gms
+      - DATAHUB_GMS_PORT=8080
+      - AUTH_OIDC_ENABLED=false
+      - SHOW_ANALYTICS=true
+      - SHOW_SEARCH=true
+      - SHOW_ENTITY_ALERTS=true
+      - SHOW_IMPACT_ANALYSIS=true
+    ports:
+      - "9002:9002"
+    depends_on:
+      datahub-gms:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  es_data:

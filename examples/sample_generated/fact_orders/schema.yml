@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: fact_orders
+    columns:
+      - name: id
+        tests:
+          - not_null
+      - name: customer_id
+        tests:
+          - not_null
+      - name: amount
+      - name: order_ts
+        tests:
+          - not_null
+      - name: tax

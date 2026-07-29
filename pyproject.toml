@@ -1,0 +1,35 @@
+[project]
+name = "dhqa"
+version = "0.1.0"
+description = "DataHub Contract QA Agent — metadata-aware codegen, test generation, and lineage-based root-causing for DataHub."
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+    "aiohttp>=3.9",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "streamlit>=1.35",
+    "tenacity>=8.0",
+]
+
+[project.scripts]
+dhqa = "dhqa.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: Live DataHub integration tests (require DATAHUB_GMS_URL env var).",
+]

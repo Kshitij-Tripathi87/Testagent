@@ -1,0 +1,11 @@
+pandas>=2.0
+numpy>=1.24
+pyyaml>=6.0
+pytest>=8.0
+pytest-asyncio>=0.23
+streamlit>=1.35
+# Track B — live DataHub integration
+aiohttp>=3.9  # GraphQL HTTP transport (default, zero-dependency DataHub client)
+# mcp>=1.0      # Optional: MCP Server transport (uncomment when DataHub MCP Server is available)
+# Track C — hardening
+tenacity>=8.0  # retry logic for flaky MCP / GraphQL calls

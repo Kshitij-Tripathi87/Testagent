@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: stg_orders
+    columns:
+      - name: id
+        tests:
+          - not_null
+      - name: customer_id
+        tests:
+          - not_null
+      - name: amount
+        tests:
+          - not_null
+      - name: order_ts
+        tests:
+          - not_null
+      - name: cleaned_amount

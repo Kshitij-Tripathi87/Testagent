@@ -1,0 +1,68 @@
+name: DataHub Contract QA Gate
+
+on:
+  pull_request:
+    paths:
+      - "models/**"
+      - "dags/**"
+  workflow_dispatch:
+    inputs:
+      dataset_urn:
+        description: "Dataset URN to check"
+        required: true
+        default: "urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.fact_orders,PROD)"
+
+jobs:
+  contract-check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dataset:
+          - urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.fact_orders,PROD)
+          - urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.stg_orders,PROD)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dhqa and dependencies
+        run: |
+          pip install -e .
+          pip install pyyaml pandas
+
+      - name: Generate local fixtures
+        run: python scripts/ingest_local_fixtures.py
+
+      - name: Run contract checks
+        id: dhqa_check
+        run: |
+          python -m dhqa.cli check \
+            --dataset "${{ matrix.dataset }}" \
+            --local-fixture data/fixtures \
+            --output results
+        continue-on-error: true
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dhqa-results-${{ matrix.dataset }}
+          path: results/
+
+      - name: Post root cause on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "## DataHub Contract QA Gate: Failure Detected\n\n"
+                + "The `dhqa check` for `${{ matrix.dataset }}` failed.\n\n"
+                + "Root cause has been traced via DataHub lineage and is available in the job artifacts.\n\n"
+                + "> This check verifies that your pipeline code matches the DataHub-declared contract "
+                + "(schema, lineage, ownership). The root-cause trace walks upstream through the lineage "
+                + "graph to identify where the anomaly originates."
+            })

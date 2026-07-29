@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.env
+.venv/
+
+# Local check-run outputs (regenerable via `dhqa check`)
+data/fixtures/results/
+examples/sample_generated/results/
