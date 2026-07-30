@@ -53,7 +53,11 @@ from datahub.metadata.schema_classes import (
 )
 
 PLATFORM = "snowflake"
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+# Write into data/fixtures/ (the same directory dhqa check reads from) so the
+# sample rows stay aligned with the fixture manifest. Previously this wrote to
+# data/ (parent), producing a stray customer_ltv_features.csv that nothing
+# consumed and that confused the demo (different schema from the fixture copy).
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "fixtures")
 
 # (name, platform, [(field, type)], upstream_names, owner)
 DATASETS = [
@@ -164,8 +168,10 @@ def write_sample_rows(inject_fault: bool) -> None:
     if inject_fault:
         # Corrupt 3 rows' customer_id in staging without it being caught upstream —
         # this is the fault the lineage tracer is built to walk back to.
+        # NOTE: use None (not "") so pd.isnull() detects the defect — an empty
+        # string is a non-null value to pandas and would silently pass not_null.
         for i in (2, 5, 9):
-            stg_rows[i]["customer_id"] = ""
+            stg_rows[i]["customer_id"] = None
 
     # fact_orders only carries forward rows whose customer_id was non-empty at
     # staging time in this simplified demo pipeline, but keeps stale ids that
@@ -184,6 +190,9 @@ def write_sample_rows(inject_fault: bool) -> None:
 
 
 def _write_csv(filename: str, rows: list[dict]) -> None:
+    if not rows:
+        print(f"  Skipping {filename}: no rows to write.")
+        return
     path = os.path.join(DATA_DIR, filename)
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))

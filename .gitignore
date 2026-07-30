@@ -10,3 +10,10 @@ dist/
 # Local check-run outputs (regenerable via `dhqa check`)
 data/fixtures/results/
 examples/sample_generated/results/
+
+# Stray sample rows from ingest_sample_data.py (regenerable; written to
+# data/fixtures/ by the fixed script). Keep the top-level copy out of Vcs.
+data/customer_ltv_features.csv
+data/raw_orders.csv
+data/stg_orders.csv
+data/fact_orders.csv

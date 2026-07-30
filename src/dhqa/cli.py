@@ -34,7 +34,7 @@ from dhqa.local_writeback import write_local_result
 from dhqa.mcp_client import DataHubMCPClient
 from dhqa.pr_description import render_pr_description
 from dhqa.smart_codegen import to_smart_dbt_model
-from dhqa.test_generator import generate_pytest_module, run_checks
+from dhqa.test_generator import generate_conftest, generate_pytest_module, run_checks
 
 
 # ----- generate -------------------------------------------------------------
@@ -60,8 +60,18 @@ def cmd_generate(args: argparse.Namespace) -> None:
         (out / f"test_{contract.name}.py").write_text(tests)
         (out / f"{contract.name}_smart.sql").write_text(smart_sql)
         (out / "PR_DESCRIPTION.md").write_text(pr_desc)
+        # Emit a conftest so the generated test_*.py runs standalone under
+        # plain pytest (wires the `df` / `upstream` fixtures to the local
+        # fixture store). Previously these tests only ran via `dhqa check`.
+        fixture_dir = args.local_fixture if args.local_fixture else None
+        try:
+            conftest = generate_conftest(contract, fixture_dir=fixture_dir)
+            (out / "conftest.py").write_text(conftest)
+        except Exception:
+            # conftest generation must never block the other artifacts.
+            pass
         print(f"Wrote {contract.name}.sql, schema.yml, test_{contract.name}.py, "
-              f"{contract.name}_smart.sql, PR_DESCRIPTION.md to {out}")
+              f"{contract.name}_smart.sql, PR_DESCRIPTION.md, conftest.py to {out}")
         return
 
     print(sql)
@@ -178,9 +188,16 @@ def _load_contract(args: argparse.Namespace) -> DatasetContract:
         local = store.get_dataset_snapshot(args.dataset)
         return DatasetContract.from_local_snapshot(local)
     if args.mcp:
-        client = DataHubMCPClient()
-        snapshot = client.get_dataset(args.dataset)
-        return DatasetContract.from_snapshot(snapshot)
+        # DataHubMCPClient.get_dataset() is async — run it in an event loop
+        # so the synchronous `dhqa generate --mcp` CLI path works.
+        import asyncio
+
+        async def _fetch() -> DatasetContract:
+            async with DataHubMCPClient(transport="graphql") as client:
+                snapshot = await client.get_dataset(args.dataset)
+                return DatasetContract.from_snapshot(snapshot)
+
+        return asyncio.run(_fetch())
     raise SystemExit("Specify a data source: --local-fixture DIR or --mcp.")
 
 

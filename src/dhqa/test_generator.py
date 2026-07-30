@@ -67,6 +67,69 @@ def generate_pytest_module(contract: DatasetContract) -> str:
     return "\n".join(lines)
 
 
+def generate_conftest(
+    contract: DatasetContract,
+    data_dir: str = "./data",
+    fixture_dir: str | None = None,
+) -> str:
+    """Render a ``conftest.py`` so generated test files run standalone.
+
+    The generated pytest module declares ``df`` / ``upstream_df_N`` fixtures
+    via type hints (see ``generate_pytest_module``). Without a conftest, pytest
+    errors with ``fixture 'df' not found``. This function emits the fixtures
+    that load the dataset CSV (and its upstreams) from a fixture directory so
+    ``pytest examples/sample_generated/<model>/test_<model>.py`` works without
+    the ``dhqa check`` orchestrator.
+
+    Args:
+        contract: the contract the tests were generated from (tells us which
+            file/upstream files to load).
+        data_dir: relative path used to locate the fixture dir from the
+            conftest's own location (default ``./data``).
+        fixture_dir: explicit fixture dir (overrides ``data_dir``). When set,
+            the conftest reads CSVs from here using the manifest file names.
+    """
+    base = fixture_dir or f"{data_dir}/fixtures"
+    # Build the per-fixture CSV paths using the manifest's declared file names.
+    # We don't know the file names from the contract alone, so the generated
+    # conftest loads via dhqa's LocalFixtureStore (which reads the manifest),
+    # keeping the generated tests decoupled from path conventions.
+    urn = contract.urn
+    upstreams_expr = ", ".join(f"{u!r}" for u in contract.upstream_urns) or ""
+    return f'''"""Auto-generated conftest.py — wires the dhqa fixtures into the
+`df` / `upstream_df_N` fixtures so these tests run standalone.
+
+Generated alongside the test module by `dhqa generate`. Re-run
+`dhqa generate --local-fixture <dir> ... -o <out>` to regenerate after
+the contract changes.
+"""
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+DATASET_URN = {urn!r}
+UPSTREAM_URNS = [{upstreams_expr}]
+FIXTURE_DIR = Path(__file__).resolve().parents[1] / {base!r} if Path({base!r}).is_absolute() else Path({base!r})
+
+
+def _load_df(urn: str) -> pd.DataFrame:
+    from dhqa.local_fixture import LocalFixtureStore
+    store = LocalFixtureStore(FIXTURE_DIR)
+    return store.get_dataset(urn).df
+
+
+@pytest.fixture
+def df() -> pd.DataFrame:
+    return _load_df(DATASET_URN)
+
+
+@pytest.fixture(params=UPSTREAM_URNS)
+def upstream(request) -> pd.DataFrame:
+    return _load_df(request.param)
+'''
+
+
 def _referential_join_key(constraint, dataset_urn: str) -> str:
     """Pick the join key for a referential check.
 

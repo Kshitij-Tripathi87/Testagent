@@ -16,7 +16,7 @@ urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.raw_orders,PROD):
     type: timestamp
     nullable: false
   owners:
-  - urn:oli:corpuser:data-team
+  - urn:li:corpuser:data-team
   glossary_terms:
   - RawData
   assertions: []
@@ -42,7 +42,7 @@ urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.stg_orders,PROD):
     type: float
     nullable: true
   owners:
-  - urn:oli:corpuser:data-team
+  - urn:li:corpuser:data-team
   glossary_terms:
   - Staging
   assertions: []
@@ -68,7 +68,7 @@ urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.fact_orders,PROD):
     type: float
     nullable: true
   owners:
-  - urn:oli:corpuser:analytics-team
+  - urn:li:corpuser:analytics-team
   glossary_terms:
   - FactTable
   - Merchant
@@ -89,7 +89,7 @@ urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.customer_ltv_features,PROD)
     type: float
     nullable: true
   owners:
-  - urn:oli:corpuser:ml-team
+  - urn:li:corpuser:ml-team
   glossary_terms:
   - MLFeatureTable
   assertions: []

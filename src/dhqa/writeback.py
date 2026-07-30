@@ -13,8 +13,8 @@ from dhqa.mcp_client import DataHubMCPClient
 from dhqa.test_generator import CheckResult
 
 
-def write_check_result(client: DataHubMCPClient, dataset_urn: str, result: CheckResult) -> None:
-    client.write_assertion(
+async def write_check_result(client: DataHubMCPClient, dataset_urn: str, result: CheckResult) -> None:
+    await client.write_assertion(
         urn=dataset_urn,
         assertion_id=result.check_id,
         passed=result.passed,
@@ -22,8 +22,8 @@ def write_check_result(client: DataHubMCPClient, dataset_urn: str, result: Check
     )
 
 
-def write_incident(client: DataHubMCPClient, dataset_urn: str, report: RootCauseReport) -> None:
-    client.write_incident(
+async def write_incident(client: DataHubMCPClient, dataset_urn: str, report: RootCauseReport) -> None:
+    await client.write_incident(
         urn=dataset_urn,
         title=f"Contract check '{report.failing_check.check_id}' failed — root cause traced",
         root_cause={

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from dhqa.dataset_model import DatasetContract
 from dhqa.lineage_tracer import RootCauseReport
 from dhqa.test_generator import CheckResult
+from dhqa.urn_utils import short_name as _short
 
 
 def render_incident_report(
@@ -109,20 +110,3 @@ def render_incident_report(
     ])
 
     return "\n".join(lines) + "\n"
-
-
-def _short(urn: str) -> str:
-    """Shorten ``urn:li:dataset:(urn:li:dataPlatform:snowflake,name,PROD)``
-    -> ``name`` and ``orders.fact_orders`` -> ``fact_orders``."""
-    if not urn:
-        return urn
-    if "," in urn:
-        parts = urn.split(",")
-        for p in parts:
-            if "." in p or "_" in p:
-                tail = p.strip().strip(")")
-                if "." in tail:
-                    tail = tail.split(".")[-1]
-                return tail
-        return parts[1].strip().strip(")")
-    return urn

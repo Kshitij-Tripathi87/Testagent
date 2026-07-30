@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from dhqa.codegen import to_dbt_model, to_schema_yml
 from dhqa.dataset_model import DatasetContract
 from dhqa.mcp_client import ColumnSpec, DatasetSnapshot
-from dhqa.test_generator import generate_pytest_module, run_checks
+from dhqa.test_generator import generate_conftest, generate_pytest_module, run_checks
 
 
 def _sample_snapshot() -> DatasetSnapshot:
@@ -61,6 +61,36 @@ def test_schema_yml_marks_not_null_columns():
     contract = DatasetContract.from_snapshot(_sample_snapshot())
     yml = to_schema_yml(contract)
     assert "id" in yml and "not_null" in yml
+
+
+def test_schema_yml_emits_unique_and_relationships_tests():
+    """schema.yml must carry unique (PK) and relationships (lineage) tests,
+    not only not_null — previously the basic codegen silently dropped these."""
+    contract = DatasetContract.from_snapshot(_sample_snapshot())
+    yml = to_schema_yml(contract)
+    assert "unique" in yml, "unique test must be emitted for the PK column"
+    assert "relationships" in yml, "relationships test must be emitted for upstream lineage"
+    # relationships must wire to the upstream model via ref(), not a raw URN
+    assert "ref('raw_orders')" in yml or "ref('fact_orders')" in yml
+    # parsed YAML must remain valid (the generator must not emit broken YAML)
+    import yaml as _yaml
+    parsed = _yaml.safe_load(yml)
+    assert parsed["version"] == 2
+    assert parsed["models"][0]["name"] == "fact_orders"
+
+
+def test_generate_conftest_is_valid_python_and_wires_fixtures():
+    """The generated conftest.py must be syntactically valid Python and must
+    provide the `df` / `upstream`/`upstream_df_*` fixtures the generated test
+    module references (otherwise pytest errors with `fixture 'df' not found`)."""
+    contract = DatasetContract.from_snapshot(_sample_snapshot())
+    src = generate_conftest(contract, fixture_dir="data/fixtures")
+    # must compile (catches syntax errors / unescaped URNs with parens)
+    compile(src, "<generated-conftest>", "exec")
+    assert "def df" in src or "@pytest.fixture" in src
+    assert "_load_df" in src
+    assert "DATASET_URN" in src
+    assert "UPSTREAM_URNS" in src
 
 
 def test_pytest_module_has_one_test_per_constraint():

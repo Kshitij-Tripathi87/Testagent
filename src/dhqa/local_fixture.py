@@ -17,6 +17,8 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from dhqa.urn_utils import short_name as _short_name
+
 
 @dataclass
 class LocalColumnSpec:
@@ -81,7 +83,7 @@ class LocalFixtureStore:
                 raise FileNotFoundError(
                     f"Fixture data file not found at {file_path} for URN {urn}"
                 )
-            name = urn.rsplit(",", 2)[0].rsplit(".", 1)[-1] if "." in urn else urn
+            name = entry.get("name", _short_name(urn))
             columns = [
                 LocalColumnSpec(
                     name=c["name"],

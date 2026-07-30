@@ -14,6 +14,7 @@ Supports two data sources:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +22,18 @@ import pandas as pd
 import streamlit as st
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "data" / "fixtures"
-RESULTS_DIR = FIXTURES_DIR / "results"
+# Allow override via env var; fall back to the bundled fixture results dir.
+RESULTS_DIR = Path(os.environ.get("DHQA_RESULTS_DIR", str(FIXTURES_DIR / "results")))
 
 
 # ── Data fetching ─────────────────────────────────────────────────────
 
 def _load_local_results() -> list[dict[str, Any]]:
-    """Load all result JSONs from the local fixture results directory."""
+    """Load all result JSONs from the local fixture results directory.
+
+    Honors the ``DHQA_RESULTS_DIR`` environment variable (matching what the
+    README documents); falls back to ``data/fixtures/results``.
+    """
     datasets: list[dict[str, Any]] = []
     if not RESULTS_DIR.exists():
         return datasets
@@ -35,13 +41,17 @@ def _load_local_results() -> list[dict[str, Any]]:
         try:
             data = json.loads(result_file.read_text())
             datasets.append(data)
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             continue
     return datasets
 
 
 def _merge_latest(datasets: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep only the most recent result per dataset URN."""
+    """Keep only the most recent result per dataset URN.
+
+    Assumes ``_load_local_results`` returns reverse-sorted (newest-first)
+    entries; the first occurrence per URN wins.
+    """
     seen: dict[str, dict[str, Any]] = {}
     for d in datasets:
         urn = d.get("dataset_urn", "unknown")
@@ -72,8 +82,28 @@ def render_catalog_health(datasets: list[dict[str, Any]]) -> None:
         })
 
     df = pd.DataFrame(rows)
-    for _, row in df.iterrows():
-        icon = "🟢" if row["Status"] == "pass" else "🔴"
+
+    # Filter + paginated table view so the catalog stays usable at scale
+    # (the old st.write-per-row approach broke on >50 datasets).
+    status_filter = st.selectbox(
+        "Filter by status", ["all", "pass", "fail"], index=0,
+        help="Show only passing or failing datasets."
+    )
+    if status_filter != "all":
+        df = df[df["Status"] == status_filter]
+
+    if df.empty:
+        st.info(f"No datasets with status '{status_filter}'.")
+        return
+
+    page_size = st.select_slider("Rows per page", options=[10, 25, 50, 100], value=25)
+    total_pages = max(1, (len(df) + page_size - 1) // page_size)
+    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1)
+    start, end = (int(page) - 1) * page_size, int(page) * page_size
+    page_df = df.iloc[start:end]
+
+    for _, row in page_df.iterrows():
+        icon = "pass" if row["Status"] == "pass" else "fail"
         st.write(
             f"{icon} `{row['Dataset']}` — "
             f"Checks: {row['Checks']} | Incidents: {row['Incidents']} | {row['Last Checked']}"
@@ -88,7 +118,11 @@ def render_incident_detail(datasets: list[dict[str, Any]]) -> None:
         return
 
     choice = st.selectbox("Dataset", [d["dataset_urn"] for d in failing])
-    dataset = next(d for d in failing if d["dataset_urn"] == choice)
+    try:
+        dataset = next(d for d in failing if d["dataset_urn"] == choice)
+    except StopIteration:
+        st.warning("Selected dataset no longer has open incidents.")
+        return
 
     st.write("### Failing Checks")
     for check in dataset.get("checks", []):

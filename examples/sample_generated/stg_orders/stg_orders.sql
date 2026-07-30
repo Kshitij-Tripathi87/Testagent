@@ -1,5 +1,5 @@
 -- Auto-generated from DataHub contract for urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.stg_orders,PROD)
--- Owners: urn:oli:corpuser:data-team
+-- Owners: urn:li:corpuser:data-team
 -- upstream: urn:li:dataset:(urn:li:dataPlatform:snowflake,orders.raw_orders,PROD)
 
 with source as (

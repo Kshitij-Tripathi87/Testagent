@@ -12,6 +12,7 @@ able to skim it in 30 seconds and decide whether to merge.
 from __future__ import annotations
 
 from dhqa.dataset_model import DatasetContract
+from dhqa.urn_utils import short_name, upstream_model_name
 
 
 def render_pr_description(
@@ -35,7 +36,7 @@ def render_pr_description(
     sla = fresh.max_staleness_hours if fresh else contract.max_staleness_hours
 
     upstream_short = ", ".join(
-        u.split(",")[1].strip(")") if "," in u else u for u in contract.upstream_urns
+        upstream_model_name(u) or u for u in contract.upstream_urns
     ) or "no upstream declared"
 
     lines = [
@@ -70,7 +71,7 @@ def render_pr_description(
         lines.append(f"- `unique` on `{col}`")
     for rel in rels:
         join_col = rel.column or "id"
-        target_short = rel.ref_urn.split(",")[1].strip(")") if rel.ref_urn and "," in rel.ref_urn else rel.ref_urn
+        target_short = upstream_model_name(rel.ref_urn) or (rel.ref_urn or "upstream")
         lines.append(
             f"- `relationships` on `{join_col}` -> `{target_short}`"
         )

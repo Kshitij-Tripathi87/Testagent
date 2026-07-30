@@ -123,7 +123,7 @@ streamlit run dashboard/app.py
 ## Tests
 
 ```bash
-python -m pytest -q          # 31 tests covering DOM, offline fixture, codegen, MCP, writeback
+python -m pytest -q          # 67 tests covering DOM, offline fixture, codegen, MCP, writeback, urn parsing, dashboard data layer, ML skew check (3 skipped — live DataHub integration)
 ```
 
 The offline test suite builds an ephemeral fixture directory under `tmp_path`

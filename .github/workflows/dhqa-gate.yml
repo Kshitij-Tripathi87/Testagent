@@ -42,9 +42,9 @@ jobs:
             --dataset "${{ matrix.dataset }}" \
             --local-fixture data/fixtures \
             --output results
-        continue-on-error: true
 
       - name: Upload results artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dhqa-results-${{ matrix.dataset }}
@@ -55,14 +55,20 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const fs = require('fs');
+            const path = require('path');
+            const resultsDir = 'results';
+            let traceBody = "The `dhqa check` for `${{ matrix.dataset }}` failed.\n\nRoot cause has been traced via DataHub lineage — see the job artifacts for the full JSON report.\n";
+            try {
+              const files = fs.existsSync(resultsDir) ? fs.readdirSync(resultsDir).filter(f => f.startsWith('incident_report_') && f.endsWith('.md')) : [];
+              if (fs.existsSync(resultsDir) && files.length > 0) {
+                const report = fs.readFileSync(path.join(resultsDir, files[0]), 'utf8');
+                traceBody = "## DataHub Contract QA Gate: Failure Detected\n\n" + report + "\n\n---\n_Full JSON results available in the job artifacts._";
+              }
+            } catch (e) { traceBody += "\n_(root-cause report could not be read: " + e.message + ")_"; }
             github.rest.issues.createComment({
-              issue_number: context.issue.number,
+              issue_number: context.payload.pull_request.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: "## DataHub Contract QA Gate: Failure Detected\n\n"
-                + "The `dhqa check` for `${{ matrix.dataset }}` failed.\n\n"
-                + "Root cause has been traced via DataHub lineage and is available in the job artifacts.\n\n"
-                + "> This check verifies that your pipeline code matches the DataHub-declared contract "
-                + "(schema, lineage, ownership). The root-cause trace walks upstream through the lineage "
-                + "graph to identify where the anomaly originates."
-            })
+              body: traceBody
+            });

@@ -11,10 +11,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from dhqa.config import DEFAULT_JOIN_KEY
 from dhqa.mcp_client import DatasetSnapshot
 
 if TYPE_CHECKING:
     from dhqa.local_fixture import LocalDatasetSnapshot
+
+
+_PRIMARY_KEY_NAMES: frozenset[str] = frozenset({
+    "id", "pk", "_id", "uid", "row_id", "key",
+})
+_FOREIGN_KEY_SUFFIXES: frozenset[str] = frozenset({"_id", "_key", "_fk"})
 
 
 @dataclass
@@ -48,13 +55,18 @@ class DatasetContract:
             if not col.nullable:
                 constraints.append(Constraint(kind="not_null", column=col.name))
             col_name = (col.name or "").lower()
-            # Heuristic: ``id`` is the dataset primary key.  Foreign keys
-            # ending in ``_id`` are kept out of the uniqueness constraint
-            # so we don't false-alarm on legitimately duplicate
-            # foreign-key values.
-            if col_name == "id" and col.name not in seen_pk:
+            # Heuristic: columns named ``id``, ``pk``, ``uid``, etc. are
+            # the dataset primary key.  Columns ending in _id/_key/_fk are
+            # treated as foreign keys (no uniqueness constraint) so we
+            # don't false-alarm on legitimately duplicated FK values.
+            _is_pk = col_name in _PRIMARY_KEY_NAMES
+            _ends_with_pk = col_name.endswith("_pk") and col_name not in _FOREIGN_KEY_SUFFIXES
+            if (_is_pk or col_name.endswith("_pk")) and col.name not in seen_pk:
                 seen_pk.add(col.name)
                 pks.append(col.name)
+            # Broader heuristic: any column NOT ending in _id/_key/_fk
+            # and declared non-nullable might be a candidate, but we only
+            # auto-add the conventional ones to avoid over-eager constraints.
             if ts_col is None and (
                 col.type.lower() in ("timestamp", "datetime")
                 or col_name.endswith(("_ts", "_at", "_date"))
@@ -65,13 +77,15 @@ class DatasetContract:
         for pk in pks:
             constraints.append(Constraint(kind="unique", column=pk))
 
+        # Derive referential join key: use the explicit PK column(s) when
+        # available, otherwise fall back to the conventional id.
+        join_key = pks[0] if pks else DEFAULT_JOIN_KEY
         for upstream in snap.upstream_urns:
-            # Use ``id`` as the default join key; configurable later.
             constraints.append(
                 Constraint(
                     kind="referential",
                     ref_urn=upstream,
-                    column="id",
+                    column=join_key,
                 )
             )
         if ts_col is not None:

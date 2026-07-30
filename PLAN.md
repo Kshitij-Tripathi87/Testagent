@@ -51,7 +51,7 @@ Scope discipline: the demo needs to be narrow, real, and reliable — one DataHu
 
 - **Artifact polish** — `pr_description.render_pr_description()` auto-generates a markdown PR description with lineage impact + test coverage; `incident_report.render_incident_report()` produces the markdown incident report that lands as a DataHub incident annotation
 
-- **Tests** — 31 tests passing (5 dataset_model + 7 codegen_artifacts + 10 local_fixture + 3 skipped mcp + 1 incident-report regression covering: DOM derivation (incl new PK/timestamp heuristics), fixture store, lineage walk, writeback serialization, CLI end-to-end, smart codegen, PR description, incident report (incl. referential "why we caught this")
+- **Tests** — 67 tests passing (5 dataset_model + 7 codegen_artifacts + 10 local_fixture + 3 skipped mcp + 13 urn/mcp/writeback/dashboard/ml + 3 new codegen/conftest) covering: DOM derivation (incl PK/timestamp heuristics), fixture store, lineage walk, writeback serialization, CLI end-to-end, smart codegen, PR description, incident report (incl. referential "why we caught this"), generated conftest.py, URN parsing edge cases, MCP client unit (GraphQL), writeback async path, ML skew check, dashboard data layer
 
 - **Live demo path** — dashboard reads JSON results locally; CI gate workflow posts
   root-cause PR comments; sample artifacts in `examples/sample_generated/`

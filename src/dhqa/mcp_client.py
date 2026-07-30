@@ -341,7 +341,7 @@ class DataHubMCPClient:
     async def _write_assertion_graphql(
         self, urn: str, assertion_id: str, passed: bool, details: dict
     ) -> None:
-        await self._graphql(
+        await self._execute_graphql(
             _UPSERT_ASSERTION,
             {
                 "input": {
@@ -359,7 +359,7 @@ class DataHubMCPClient:
         self, urn: str, title: str, root_cause: dict
     ) -> None:
         import json
-        await self._graphql(
+        await self._execute_graphql(
             _CREATE_INCIDENT,
             {
                 "input": {
