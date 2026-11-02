@@ -2,8 +2,6 @@
 
 **An agent that treats your DataHub catalog as the source of truth for data contracts — generates pipeline code and tests from it, root-causes failures by walking the lineage graph, and writes verdicts back into DataHub instead of just failing a CI job silently.**
 
-Built for the DataHub Agent Hackathon — Category: *Metadata-Aware Code Generation & Development* (with a *Production ML Agents* extension for training/serving skew).
-
 ## The problem
 
 Most "AI writes my dbt model" demos stop at code generation. They don't answer the question a data engineer actually asks before merging a PR: **is this code correct against what's really in production, and if it breaks, why?**
