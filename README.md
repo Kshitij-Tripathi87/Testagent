@@ -1,6 +1,6 @@
-# DataHub Contract QA Agent
+# Testagent
 
-**An agent that treats your DataHub catalog as the source of truth for data contracts — generates pipeline code and tests from it, root-causes failures by walking the lineage graph, and writes verdicts back into DataHub instead of just failing a CI job silently.**
+**A full-stack data quality engineering and incident-response agent. Start from local CSV data, define contracts, run checks, investigate failures, and coordinate engineering follow-up across GitHub, Jira and Slack. DataHub catalog sync is optional and can be added later.**
 
 ## The problem
 
@@ -191,3 +191,10 @@ The repository now also contains a FastAPI + PostgreSQL + Redis/RQ backend and a
 - App Docker Compose: `infra/docker-compose.app.yml`
 
 The current beta execution mode combines live DataHub metadata with uploaded CSV row data. Warehouse query adapters and DataHub assertion/incident writeback remain follow-on work; see the beta guide for operational and security limitations.
+
+
+## Connectors and multi-step incident response
+
+DataHub is optional for the beta. You can start by creating a local dataset from a CSV, defining quality checks and running the existing engine. Connectors for GitHub, Jira Cloud and Slack can then turn a saved incident into an approval-gated workflow: collect evidence, create a GitHub issue, create a Jira ticket, and notify a Slack channel. Credentials are encrypted at rest and workspace-scoped.
+
+See the full-stack beta guide in docs/FULL_STACK_BETA.md for connector permissions, local setup and workflow limitations. The initial agent planner is deterministic and does not require an LLM API key; external writes always require explicit approval.

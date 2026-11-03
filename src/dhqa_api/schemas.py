@@ -50,3 +50,27 @@ class RunCreate(BaseModel):
 
 class IncidentUpdate(BaseModel):
     status: Literal["open", "acknowledged", "resolved"]
+
+
+
+class IntegrationCreate(BaseModel):
+    provider: Literal["github", "slack", "jira"]
+    name: str = Field(min_length=2, max_length=100)
+    config: dict[str, str]
+    credentials: dict[str, str]
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class IncidentResponsePlanCreate(BaseModel):
+    incident_id: str = Field(min_length=1, max_length=36)
+    integration_ids: list[str] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def unique_integrations(self):
+        if len(set(self.integration_ids)) != len(self.integration_ids):
+            raise ValueError("Select each integration connection only once")
+        return self

@@ -47,6 +47,8 @@ export default function Home() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState("");
   const [workspaceName, setWorkspaceName] = useState("My data workspace");
+  const [localDatasetName, setLocalDatasetName] = useState("Sample dataset");
+  const [localDatasetFile, setLocalDatasetFile] = useState<File | null>(null);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDataset, setSelectedDataset] = useState("");
@@ -167,6 +169,31 @@ export default function Home() {
       setMessage("Workspace created.");
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(""); }
+  }
+
+  async function createLocalDataset(event: FormEvent) {
+    event.preventDefault();
+    if (!workspaceId || !localDatasetFile) return;
+    setBusy("local-dataset"); setError(""); setMessage("");
+    try {
+      const form = new FormData();
+      form.append("name", localDatasetName);
+      form.append("file", localDatasetFile);
+      const created = await apiRequest<{
+        id: string; name: string; upload: UploadInfo;
+      }>("/api/v1/workspaces/" + workspaceId + "/datasets/local", {
+        ...credentials, method: "POST", body: form,
+      });
+      await loadWorkspace(workspaceId);
+      setSelectedDataset(created.id);
+      setFile(localDatasetFile);
+      setLocalDatasetFile(null);
+      setMessage("Local dataset created. Review its contract, then run a quality check.");
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy("");
+    }
   }
 
   async function connectDataHub(event: React.FormEvent) {
@@ -335,6 +362,7 @@ export default function Home() {
           <a><Play size={17}/> Quality runs</a>
           <a><GitBranch size={17}/> Lineage & incidents</a>
           <a><Bot size={17}/> Agent artifacts</a>
+          <a href="/agent"><Bot size={17}/> Agent & integrations</a>
         </nav>
         <div className="sidebar-bottom">
           <div className="connection-state"><span className="status-dot"/> API workspace</div>
@@ -365,15 +393,26 @@ export default function Home() {
             <>
               <div className="welcome-row"><div><h1>Make data quality observable.</h1><p className="muted">A single place to validate contracts, trace failures and ship better data.</p></div><div className="workspace-label"><span className="eyebrow">ACTIVE WORKSPACE</span><strong>{workspaces.find((w)=>w.id===workspaceId)?.name}</strong></div></div>
               <div className="metric-grid">
-                <Metric icon={<Database size={18}/>} label="Catalog datasets" value={String(datasets.length)} hint="Synced from DataHub"/>
+                <Metric icon={<Database size={18}/>} label="Datasets" value={String(datasets.length)} hint="Local CSV or DataHub"/>
                 <Metric icon={<Play size={18}/>} label="Quality runs" value={String(runs.length)} hint="Saved execution history"/>
                 <Metric icon={<AlertTriangle size={18}/>} label="Open incidents" value={String(incidents.filter((incident)=>incident.status!=="resolved").length)} hint="Unresolved investigations"/>
                 <Metric icon={<ShieldCheck size={18}/>} label="Contracts" value={String(datasets.length)} hint="One per synced dataset"/>
               </div>
 
+              <section className="panel">
+                <div className="panel-heading"><div><span className="eyebrow">NO CATALOG REQUIRED</span><h3>Create a local dataset</h3><p className="muted small-copy">Upload a CSV to start building contracts and quality checks. DataHub can be connected later.</p></div><Upload size={20}/></div>
+                <form className="stack compact-form" onSubmit={createLocalDataset}>
+                  <div className="form-row">
+                    <label>Dataset name<input value={localDatasetName} onChange={(event)=>setLocalDatasetName(event.target.value)} minLength={2} maxLength={100} required/></label>
+                    <label className="upload-zone"><Upload size={18}/><strong>{localDatasetFile ? localDatasetFile.name : "Choose CSV file"}</strong><span>{localDatasetFile ? (localDatasetFile.size/1024).toFixed(1)+" KB" : "Maximum 25 MB"}</span><input type="file" accept=".csv,text/csv" onChange={(event)=>setLocalDatasetFile(event.target.files?.[0]||null)}/></label>
+                  </div>
+                  <div><button className="primary-button" disabled={!workspaceId||!localDatasetFile||busy==="local-dataset"}>{busy==="local-dataset"?<Loader2 className="spin" size={16}/>:<Plus size={16}/>} Create local dataset</button></div>
+                </form>
+              </section>
+
               <div className="two-column">
                 <section className="panel">
-                  <div className="panel-heading"><div><span className="eyebrow">INTEGRATION</span><h3>DataHub connection</h3></div><Cloud size={20}/></div>
+                  <div className="panel-heading"><div><span className="eyebrow">OPTIONAL INTEGRATION</span><h3>DataHub connection</h3></div><Cloud size={20}/></div>
                   {connections.length ? (
                     <div className="connection-list">
                       {connections.map((connection)=><div className="connection-row" key={connection.id}>
@@ -412,7 +451,7 @@ export default function Home() {
                   {datasets.map((dataset)=><button className={cx("dataset-row",selectedDataset===dataset.id&&"selected")} key={dataset.id} onClick={()=>setSelectedDataset(dataset.id)}>
                     <span><strong>{dataset.name}</strong><small>{dataset.urn}</small></span><span>{dataset.column_count}</span><span>{dataset.upstream_count}</span><span>v{dataset.contract_version}</span><ChevronRight size={16}/>
                   </button>)}
-                </div> : <div className="empty-state"><Database size={28}/><strong>Your catalog is empty</strong><p>Connect DataHub and sync datasets to get started.</p></div>}
+                </div> : <div className="empty-state"><Database size={28}/><strong>No datasets yet</strong><p>Create a local CSV dataset above, or connect DataHub whenever you are ready.</p></div>}
               </section>
 
               {detail && <section className="panel">

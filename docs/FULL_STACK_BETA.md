@@ -136,3 +136,24 @@ Set the required environment variables in the repository-root .env. For a local 
 ## Verification
 
 CI installs the app and dev dependency extras, runs compile checks and the Python test suite, then installs the Next.js dependencies and runs TypeScript and production-build checks. Live DataHub connectivity still requires a separately provisioned instance and credentials; no live integration test is represented as passing by the offline suite.
+
+
+## Workspace integrations and the first multi-step agent
+
+DataHub is optional. A workspace can create a local dataset directly from a CSV file; Testagent infers a starting schema, stores the CSV as a workspace upload, and supports the same contracts and quality-run engine without a DataHub account.
+
+The first work-app connectors are GitHub, Jira Cloud and Slack:
+- GitHub: configure an owner/repository and a fine-grained token with repository Issues: write permission.
+- Jira Cloud: configure an HTTPS Atlassian Cloud URL, account email, project key and API token. The account must have permission to create issues in the selected project. This is starter Cloud authentication; use OAuth 2.0 (3LO) before shipping a public multi-tenant integration.
+- Slack: configure the channel ID and a bot token with chat:write; invite the bot into the target channel (or explicitly grant the required public-channel posting scope).
+
+Connector credentials are encrypted with the existing application Fernet key and are never returned by list APIs. Connector tests make read-only identity/repository checks. Each connector is scoped to a workspace.
+
+### Incident response workflow
+
+1. The planner reads a saved incident, its quality run and bounded lineage evidence.
+2. It prepares a reviewable plan with an evidence summary and the exact GitHub repository, Jira project and Slack channel destinations.
+3. No external write occurs until a workspace member explicitly approves the plan.
+4. The RQ worker executes the selected steps in a fixed sequence (evidence -> GitHub -> Jira -> Slack), storing step results and errors. A failed step stops subsequent steps; completed earlier steps remain visible.
+
+The initial planner is intentionally deterministic and evidence-based. It does not call an LLM, generate arbitrary tool calls, or need a model API key. The workflow is the first agent specialization, not yet a general-purpose autonomous planning framework. External service connectivity is covered with mocked HTTP tests in CI; a beta operator must still test real tokens, permissions, and channel/project configuration before relying on live actions. External APIs do not share one transaction: an action that succeeds remotely but loses its response during a network failure may require manual reconciliation before retrying.

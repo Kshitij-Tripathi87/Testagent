@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pandas as pd
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from redis import Redis
@@ -24,7 +25,11 @@ from dhqa_api.contracts import contract_from_dict, contract_to_dict
 from dhqa_api.db import Base, engine, get_db
 from dhqa_api.encryption import decrypt_secret, encrypt_secret
 from dhqa_api.integrations.datahub import DataHubGraphQL
+from dhqa_api.integrations.work_apps import IntegrationError, test_integration, validate_integration_config, validate_integration_credentials
+from dhqa_api.agent_planner import build_incident_response_steps
 from dhqa_api.models import (
+    AgentWorkflow,
+    AgentWorkflowStep,
     AuditEvent,
     CheckResultRow,
     ContractVersion,
@@ -33,12 +38,15 @@ from dhqa_api.models import (
     DatasetUpload,
     GeneratedArtifact,
     Incident,
+    IntegrationConnection,
     QualityRun,
     Workspace,
     WorkspaceMember,
     utcnow,
 )
 from dhqa_api.schemas import (
+    IncidentResponsePlanCreate,
+    IntegrationCreate,
     ConnectionCreate,
     ContractUpdate,
     IncidentUpdate,
@@ -50,7 +58,7 @@ from dhqa_api.security import current_identity
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    description="Workspace API for DataHub-grounded data quality engineering.",
+    description="Workspace API for data quality engineering, integrations and controlled agent workflows.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -901,3 +909,337 @@ def list_contract_versions(
         }
         for row in rows
     ]
+
+
+
+def _integration_response(row: IntegrationConnection) -> dict[str, Any]:
+    return {"id": row.id, "provider": row.provider, "name": row.name,
+            "config": row.config_json or {}, "status": row.status,
+            "last_tested_at": row.last_tested_at.isoformat() if row.last_tested_at else None}
+
+
+def _agent_workflow_response(db: Session, workflow: AgentWorkflow) -> dict[str, Any]:
+    steps = db.scalars(select(AgentWorkflowStep).where(
+        AgentWorkflowStep.workflow_id == workflow.id
+    ).order_by(AgentWorkflowStep.position)).all()
+    incident = db.get(Incident, workflow.incident_id)
+    return {
+        "id": workflow.id, "incident_id": workflow.incident_id,
+        "incident_title": incident.title if incident else None, "status": workflow.status,
+        "plan": workflow.plan_json or {}, "result": workflow.result_json or {},
+        "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
+        "approved_at": workflow.approved_at.isoformat() if workflow.approved_at else None,
+        "started_at": workflow.started_at.isoformat() if workflow.started_at else None,
+        "finished_at": workflow.finished_at.isoformat() if workflow.finished_at else None,
+        "steps": [{"id": step.id, "position": step.position, "step_key": step.step_key,
+                   "provider": step.provider, "title": step.title, "description": step.description,
+                   "status": step.status, "result": step.result_json or {}, "error": step.error_message}
+                  for step in steps],
+    }
+
+
+@app.get("/api/v1/workspaces/{workspace_id}/integrations")
+def list_integrations(workspace_id: str, identity: dict[str, Any] = Depends(current_identity),
+                      db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    ensure_workspace(db, workspace_id, identity)
+    rows = db.scalars(select(IntegrationConnection).where(
+        IntegrationConnection.workspace_id == workspace_id
+    ).order_by(IntegrationConnection.created_at.desc())).all()
+    return [_integration_response(row) for row in rows]
+
+
+@app.post("/api/v1/workspaces/{workspace_id}/integrations", status_code=status.HTTP_201_CREATED)
+def create_integration(workspace_id: str, body: IntegrationCreate,
+                       identity: dict[str, Any] = Depends(current_identity),
+                       db: Session = Depends(get_db)) -> dict[str, Any]:
+    ensure_workspace(db, workspace_id, identity)
+    try:
+        config = validate_integration_config(body.provider, body.config)
+        credentials = validate_integration_credentials(body.provider, body.credentials)
+        encrypted_secret = encrypt_secret(json.dumps(credentials))
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422 if isinstance(exc, ValueError) else 503, detail=str(exc)) from exc
+    row = IntegrationConnection(workspace_id=workspace_id, provider=body.provider,
+                                name=body.name.strip(), config_json=config,
+                                secret_ciphertext=encrypted_secret, status="unverified")
+    db.add(row)
+    db.flush()
+    record_audit(db, workspace_id, identity, "integration.created", "integration", row.id,
+                 {"provider": row.provider, "name": row.name, "target": config})
+    db.commit()
+    return _integration_response(row)
+
+
+@app.post("/api/v1/workspaces/{workspace_id}/integrations/{integration_id}/test")
+def check_integration(workspace_id: str, integration_id: str,
+                      identity: dict[str, Any] = Depends(current_identity),
+                      db: Session = Depends(get_db)) -> dict[str, Any]:
+    ensure_workspace(db, workspace_id, identity)
+    row = db.scalar(select(IntegrationConnection).where(
+        IntegrationConnection.id == integration_id, IntegrationConnection.workspace_id == workspace_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="Integration connection not found")
+    try:
+        credentials = json.loads(decrypt_secret(row.secret_ciphertext))
+        result = test_integration(row.provider, row.config_json or {}, credentials)
+        row.status = "connected"
+        row.last_tested_at = utcnow()
+        record_audit(db, workspace_id, identity, "integration.tested", "integration", row.id,
+                     {"provider": row.provider, "status": "connected", "account": result.get("account")})
+        db.commit()
+        return {"id": row.id, "status": row.status, "result": result}
+    except Exception as exc:
+        row.status = "error"
+        row.last_tested_at = utcnow()
+        record_audit(db, workspace_id, identity, "integration.tested", "integration", row.id,
+                     {"provider": row.provider, "status": "error"})
+        db.commit()
+        detail = str(exc) if isinstance(exc, (IntegrationError, ValueError)) else f"{row.provider} connection test failed"
+        raise HTTPException(status_code=502, detail=detail[:1000]) from exc
+
+
+@app.delete("/api/v1/workspaces/{workspace_id}/integrations/{integration_id}")
+def delete_integration(workspace_id: str, integration_id: str,
+                       identity: dict[str, Any] = Depends(current_identity),
+                       db: Session = Depends(get_db)) -> dict[str, bool]:
+    ensure_workspace(db, workspace_id, identity)
+    row = db.scalar(select(IntegrationConnection).where(
+        IntegrationConnection.id == integration_id, IntegrationConnection.workspace_id == workspace_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="Integration connection not found")
+    active_step = db.scalar(select(AgentWorkflowStep.id).join(
+        AgentWorkflow, AgentWorkflow.id == AgentWorkflowStep.workflow_id
+    ).where(AgentWorkflowStep.connection_id == row.id,
+            AgentWorkflow.status.in_(["awaiting_approval", "queued", "running"])).limit(1))
+    if active_step:
+        raise HTTPException(status_code=409, detail="This integration is referenced by an active agent workflow")
+    record_audit(db, workspace_id, identity, "integration.deleted", "integration", row.id,
+                 {"provider": row.provider, "name": row.name})
+    db.delete(row)
+    db.commit()
+    return {"deleted": True}
+
+
+@app.post("/api/v1/workspaces/{workspace_id}/agent/incident-response", status_code=status.HTTP_201_CREATED)
+def create_incident_response_plan(workspace_id: str, body: IncidentResponsePlanCreate,
+                                  identity: dict[str, Any] = Depends(current_identity),
+                                  db: Session = Depends(get_db)) -> dict[str, Any]:
+    ensure_workspace(db, workspace_id, identity)
+    incident = db.scalar(select(Incident).where(
+        Incident.id == body.incident_id, Incident.workspace_id == workspace_id))
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    dataset = db.scalar(select(Dataset).where(
+        Dataset.id == incident.dataset_id, Dataset.workspace_id == workspace_id))
+    run = db.scalar(select(QualityRun).where(
+        QualityRun.id == incident.run_id, QualityRun.workspace_id == workspace_id))
+    if not dataset or not run:
+        raise HTTPException(status_code=409, detail="Incident evidence is no longer available")
+    integrations = db.scalars(select(IntegrationConnection).where(
+        IntegrationConnection.workspace_id == workspace_id,
+        IntegrationConnection.id.in_(body.integration_ids))).all()
+    if len(integrations) != len(body.integration_ids):
+        raise HTTPException(status_code=404, detail="One or more selected integrations were not found")
+    if len({row.provider for row in integrations}) != len(integrations):
+        raise HTTPException(status_code=422, detail="Select at most one connection for each provider")
+    disconnected = [row.name for row in integrations if row.status != "connected"]
+    if disconnected:
+        raise HTTPException(status_code=409, detail="Test these integrations before planning: " + ", ".join(disconnected))
+    workflow_id = str(uuid.uuid4())
+    planned_steps = build_incident_response_steps(incident, dataset, run, integrations, workflow_id)
+    if len(planned_steps) < 2:
+        raise HTTPException(status_code=422, detail="Select at least one supported integration")
+    workflow = AgentWorkflow(
+        id=workflow_id, workspace_id=workspace_id, incident_id=incident.id,
+        status="awaiting_approval", created_by=identity_subject(identity),
+        plan_json={"planner": "deterministic-evidence-planner", "requires_approval": True,
+                   "summary": f"Respond to {incident.title} for dataset {dataset.name}.",
+                   "steps": [{"step_key": step["step_key"], "provider": step["provider"],
+                              "title": step["title"], "description": step["description"],
+                              "connection_id": step["connection_id"]} for step in planned_steps]},
+    )
+    db.add(workflow)
+    db.flush()
+    for position, step in enumerate(planned_steps):
+        db.add(AgentWorkflowStep(
+            workflow_id=workflow.id, position=position, step_key=step["step_key"],
+            provider=step["provider"], connection_id=step["connection_id"],
+            title=step["title"], description=step["description"], status="pending",
+            input_json=step["payload"]))
+    record_audit(db, workspace_id, identity, "agent.plan_created", "agent_workflow", workflow.id,
+                 {"incident_id": incident.id, "step_count": len(planned_steps),
+                  "providers": [row.provider for row in integrations]})
+    db.commit()
+    return _agent_workflow_response(db, workflow)
+
+
+@app.get("/api/v1/workspaces/{workspace_id}/agent/runs")
+def list_agent_workflows(workspace_id: str, identity: dict[str, Any] = Depends(current_identity),
+                         db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    ensure_workspace(db, workspace_id, identity)
+    rows = db.scalars(select(AgentWorkflow).where(
+        AgentWorkflow.workspace_id == workspace_id
+    ).order_by(AgentWorkflow.created_at.desc()).limit(50)).all()
+    return [_agent_workflow_response(db, row) for row in rows]
+
+
+@app.get("/api/v1/workspaces/{workspace_id}/agent/runs/{workflow_id}")
+def get_agent_workflow(workspace_id: str, workflow_id: str,
+                       identity: dict[str, Any] = Depends(current_identity),
+                       db: Session = Depends(get_db)) -> dict[str, Any]:
+    ensure_workspace(db, workspace_id, identity)
+    workflow = db.scalar(select(AgentWorkflow).where(
+        AgentWorkflow.id == workflow_id, AgentWorkflow.workspace_id == workspace_id))
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Agent workflow not found")
+    return _agent_workflow_response(db, workflow)
+
+
+@app.post("/api/v1/workspaces/{workspace_id}/agent/runs/{workflow_id}/approve",
+          status_code=status.HTTP_202_ACCEPTED)
+def approve_agent_workflow(workspace_id: str, workflow_id: str,
+                           identity: dict[str, Any] = Depends(current_identity),
+                           db: Session = Depends(get_db)) -> dict[str, Any]:
+    ensure_workspace(db, workspace_id, identity)
+    workflow = db.scalar(select(AgentWorkflow).where(
+        AgentWorkflow.id == workflow_id, AgentWorkflow.workspace_id == workspace_id))
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Agent workflow not found")
+    if workflow.status != "awaiting_approval":
+        raise HTTPException(status_code=409, detail="Only a plan awaiting approval can be executed")
+    workflow.status = "queued"
+    workflow.approved_by = identity_subject(identity)
+    workflow.approved_at = utcnow()
+    record_audit(db, workspace_id, identity, "agent.plan_approved", "agent_workflow", workflow.id,
+                 {"step_count": len((workflow.plan_json or {}).get("steps", []))})
+    db.commit()
+    try:
+        queue = Queue("testagent", connection=Redis.from_url(settings.redis_url))
+        queue.enqueue("dhqa_api.agent_worker.execute_agent_workflow", workflow.id,
+                      job_timeout="15m", result_ttl=86400, failure_ttl=604800)
+    except Exception as exc:
+        workflow.status = "failed"
+        workflow.finished_at = utcnow()
+        workflow.result_json = {"error": "Could not submit agent workflow to the background queue"}
+        db.commit()
+        raise HTTPException(status_code=503, detail="Background worker queue is unavailable") from exc
+    return _agent_workflow_response(db, workflow)
+
+
+
+@app.post("/api/v1/workspaces/{workspace_id}/datasets/local", status_code=status.HTTP_201_CREATED)
+async def create_local_dataset(
+    workspace_id: str,
+    name: str = Form(..., min_length=2, max_length=100),
+    file: UploadFile = File(...),
+    identity: dict[str, Any] = Depends(current_identity),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Create a workspace-local dataset from CSV, without requiring DataHub."""
+    ensure_workspace(db, workspace_id, identity)
+    clean_name = name.strip()
+    if len(clean_name) < 2:
+        raise HTTPException(status_code=422, detail="Dataset name must contain at least two characters")
+    file_name = Path(file.filename or "dataset.csv").name
+    if Path(file_name).suffix.lower() != ".csv":
+        raise HTTPException(status_code=415, detail="Only CSV uploads are supported")
+    content = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
+    if len(content) > settings.max_upload_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File exceeds {settings.max_upload_mb} MB")
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded CSV is empty")
+    try:
+        preview = pd.read_csv(io.BytesIO(content), nrows=settings.max_csv_rows + 1)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {exc}") from exc
+    if len(preview) > settings.max_csv_rows:
+        raise HTTPException(status_code=413, detail=f"CSV exceeds {settings.max_csv_rows} rows")
+    if len(preview.columns) == 0:
+        raise HTTPException(status_code=422, detail="CSV must contain at least one column")
+    columns = [
+        {
+            "name": str(column),
+            "type": str(preview[column].dtype),
+            "nullable": bool(preview[column].isna().any()),
+            "description": None,
+        }
+        for column in preview.columns
+    ]
+    dataset_id = str(uuid.uuid4())
+    urn = (
+        f"urn:li:dataset:(urn:li:dataPlatform:testagent_local,"
+        f"{workspace_id}.{dataset_id.replace('-', '')[:12]},DEV)"
+    )
+    metadata = {
+        "urn": urn,
+        "name": clean_name,
+        "columns": columns,
+        "owners": [],
+        "upstream_urns": [],
+        "glossary_terms": [],
+    }
+    contract = {
+        "urn": urn,
+        "name": clean_name,
+        "columns": columns,
+        "owners": [],
+        "upstream_urns": [],
+        "constraints": [],
+        "primary_key_columns": [],
+        "timestamp_column": None,
+        "max_staleness_hours": 24,
+    }
+    dataset = Dataset(
+        id=dataset_id,
+        workspace_id=workspace_id,
+        connection_id=None,
+        urn=urn,
+        name=clean_name,
+        metadata_json=metadata,
+        contract_json=contract,
+        contract_version=1,
+    )
+    db.add(dataset)
+    db.flush()
+    db.add(ContractVersion(
+        dataset_id=dataset.id,
+        version=1,
+        contract_json=contract,
+        created_by=identity_subject(identity),
+    ))
+    upload_id = str(uuid.uuid4())
+    target_dir = settings.upload_dir / workspace_id / dataset.id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / f"{upload_id}.csv"
+    target_path.write_bytes(content)
+    upload = DatasetUpload(
+        id=upload_id,
+        dataset_id=dataset.id,
+        file_name=file_name[:255],
+        storage_path=str(target_path),
+        size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+        row_count=len(preview),
+        columns_json=[item["name"] for item in columns],
+        created_by=identity_subject(identity),
+    )
+    db.add(upload)
+    record_audit(
+        db, workspace_id, identity, "dataset.local_created", "dataset", dataset.id,
+        {"upload_id": upload.id, "row_count": upload.row_count, "column_count": len(columns)},
+    )
+    db.commit()
+    return {
+        "id": dataset.id,
+        "urn": dataset.urn,
+        "name": dataset.name,
+        "contract_version": dataset.contract_version,
+        "metadata": metadata,
+        "upload": {
+            "id": upload.id,
+            "file_name": upload.file_name,
+            "size_bytes": upload.size_bytes,
+            "row_count": upload.row_count,
+            "columns": upload.columns_json,
+        },
+    }

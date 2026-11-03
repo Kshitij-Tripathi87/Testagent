@@ -17,7 +17,10 @@ from dhqa_api import main as api
 from dhqa_api.config import settings
 from dhqa_api.db import Base, get_db
 from dhqa_api.encryption import decrypt_secret
-from dhqa_api.models import ContractVersion, DataConnection, Dataset, DatasetUpload
+from dhqa_api.models import (
+    AgentWorkflow, AgentWorkflowStep, ContractVersion, DataConnection, Dataset,
+    DatasetUpload, Incident, IntegrationConnection, QualityRun,
+)
 
 
 @pytest.fixture
@@ -311,3 +314,218 @@ def test_catalog_sync_preserves_custom_rules_and_versions_schema_changes(api_env
         assert len(snapshots) == 3
         assert snapshots[-1].contract_json["columns"][-1]["name"] == "status"
         assert snapshots[-1].contract_json["constraints"][0]["column"] == "email"
+
+
+
+def test_local_csv_dataset_can_be_created_without_datahub(api_env):
+    client, session_factory = api_env
+    workspace_id = _create_workspace(client)
+    response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets/local",
+        headers={"X-Dev-User": "qa-user"},
+        data={"name": "Orders"},
+        files={"file": ("orders.csv", b"id,amount\n1,2.5\n2,3.5\n", "text/csv")},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["name"] == "Orders"
+    assert body["urn"].startswith("urn:li:dataset:(urn:li:dataPlatform:testagent_local,")
+    assert body["upload"]["row_count"] == 2
+    assert body["metadata"]["columns"][0]["name"] == "id"
+    with session_factory() as db:
+        dataset = db.get(Dataset, body["id"])
+        assert dataset is not None
+        assert dataset.connection_id is None
+        assert db.get(DatasetUpload, body["upload"]["id"]) is not None
+        assert db.scalar(select(ContractVersion).where(ContractVersion.dataset_id == dataset.id)) is not None
+
+
+def test_integrations_are_encrypted_and_incident_agent_requires_approval(api_env, monkeypatch):
+    client, session_factory = api_env
+    workspace_id = _create_workspace(client)
+    headers = {"X-Dev-User": "qa-user"}
+    local = client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets/local",
+        headers=headers, data={"name": "Orders"},
+        files={"file": ("orders.csv", b"id,amount\n1,2.5\n2,3.5\n", "text/csv")},
+    )
+    assert local.status_code == 201, local.text
+
+    with session_factory() as db:
+        run = QualityRun(
+            workspace_id=workspace_id, dataset_id=local.json()["id"],
+            upload_id=local.json()["upload"]["id"], status="completed",
+            passed=False, created_by="qa-user",
+        )
+        db.add(run)
+        db.flush()
+        incident = Incident(
+            workspace_id=workspace_id, dataset_id=local.json()["id"], run_id=run.id,
+            title="not_null check failed: id", status="open",
+            details_json={
+                "summary": "A required value was missing in an uploaded row.",
+                "origin_urn": "local-source", "hop_distance": 0,
+                "trace": [{"urn": "local-source", "checked": True, "passed": False,
+                           "detail": "Found a null value", "path": ["local-source"]}],
+            },
+        )
+        db.add(incident)
+        db.commit()
+        incident_id = incident.id
+
+    provider_payloads = [
+        {"provider": "github", "name": "GitHub repo",
+         "config": {"repository": "acme/data-platform"},
+         "credentials": {"access_token": "ghp_unit_test_secret"}},
+        {"provider": "jira", "name": "Jira project",
+         "config": {"base_url": "https://acme.atlassian.net", "email": "qa@acme.example",
+                    "project_key": "DATA", "issue_type": "Task"},
+         "credentials": {"api_token": "jira_unit_test_secret"}},
+        {"provider": "slack", "name": "Slack channel",
+         "config": {"channel_id": "C0123456789"},
+         "credentials": {"bot_token": "xoxb-unit-test-secret"}},
+    ]
+    integration_ids = []
+    for payload in provider_payloads:
+        created = client.post(
+            f"/api/v1/workspaces/{workspace_id}/integrations",
+            headers=headers, json=payload,
+        )
+        assert created.status_code == 201, created.text
+        integration_ids.append(created.json()["id"])
+        assert "credentials" not in created.text
+        with session_factory() as db:
+            row = db.get(IntegrationConnection, created.json()["id"])
+            assert row is not None
+            assert "unit_test_secret" not in row.secret_ciphertext
+            row.status = "connected"
+            db.commit()
+
+    listed = client.get(f"/api/v1/workspaces/{workspace_id}/integrations", headers=headers)
+    assert listed.status_code == 200
+    assert all("credentials" not in item for item in listed.json())
+
+    plan = client.post(
+        f"/api/v1/workspaces/{workspace_id}/agent/incident-response",
+        headers=headers, json={"incident_id": incident_id, "integration_ids": integration_ids},
+    )
+    assert plan.status_code == 201, plan.text
+    planned = plan.json()
+    assert planned["status"] == "awaiting_approval"
+    assert [step["provider"] for step in planned["steps"]] == ["testagent", "github", "jira", "slack"]
+    assert planned["plan"]["requires_approval"] is True
+
+    queued = []
+    class FakeQueue:
+        def __init__(self, *_args, **_kwargs):
+            pass
+        def enqueue(self, *args, **kwargs):
+            queued.append((args, kwargs))
+    monkeypatch.setattr(api, "Queue", FakeQueue)
+    approved = client.post(
+        f"/api/v1/workspaces/{workspace_id}/agent/runs/{planned['id']}/approve",
+        headers=headers,
+    )
+    assert approved.status_code == 202, approved.text
+    assert approved.json()["status"] == "queued"
+    assert len(queued) == 1
+    assert queued[0][0][0] == "dhqa_api.agent_worker.execute_agent_workflow"
+
+    from dhqa_api import agent_worker
+    calls = []
+    monkeypatch.setattr(agent_worker, "SessionLocal", session_factory)
+    def fake_execute(provider, config, credentials, payload, workflow_id):
+        calls.append((provider, workflow_id, payload))
+        return {"url": f"https://example.test/{provider}/{workflow_id}"}
+    monkeypatch.setattr(agent_worker, "execute_action", fake_execute)
+    result = agent_worker.execute_agent_workflow(planned["id"])
+    assert result["status"] == "completed"
+    assert [provider for provider, _, _ in calls] == ["github", "jira", "slack"]
+    assert all(workflow_id == planned["id"] for _, workflow_id, _ in calls)
+    slack_payload = calls[-1][2]
+    jira_payload = calls[1][2]
+    assert "https://example.test/github/" + planned["id"] in jira_payload["description"]
+    assert "https://example.test/github/" + planned["id"] in slack_payload["text"]
+    assert "https://example.test/jira/" + planned["id"] in slack_payload["text"]
+    detail = client.get(
+        f"/api/v1/workspaces/{workspace_id}/agent/runs/{planned['id']}", headers=headers,
+    )
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "completed"
+    assert all(step["status"] == "completed" for step in detail.json()["steps"])
+    assert agent_worker.execute_agent_workflow(planned["id"])["idempotent"] is True
+    cross_workspace = client.get(
+        f"/api/v1/workspaces/{workspace_id}/integrations",
+        headers={"X-Dev-User": "other-user"},
+    )
+    assert cross_workspace.status_code == 404
+
+
+def test_incident_agent_stops_after_connector_failure(api_env, monkeypatch):
+    client, session_factory = api_env
+    workspace_id = _create_workspace(client)
+    headers = {"X-Dev-User": "qa-user"}
+    local = client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets/local",
+        headers=headers, data={"name": "Customers"},
+        files={"file": ("customers.csv", b"id,email\n1,a@example.test\n", "text/csv")},
+    )
+    assert local.status_code == 201, local.text
+    with session_factory() as db:
+        run = QualityRun(
+            workspace_id=workspace_id, dataset_id=local.json()["id"],
+            upload_id=local.json()["upload"]["id"], status="completed",
+            passed=False, created_by="qa-user",
+        )
+        db.add(run)
+        db.flush()
+        incident = Incident(
+            workspace_id=workspace_id, dataset_id=local.json()["id"], run_id=run.id,
+            title="email uniqueness failed", status="open",
+            details_json={"summary": "Duplicate emails"},
+        )
+        db.add(incident)
+        db.commit()
+        incident_id = incident.id
+    created = client.post(
+        f"/api/v1/workspaces/{workspace_id}/integrations",
+        headers=headers, json={
+            "provider": "github", "name": "Test GitHub",
+            "config": {"repository": "acme/data"},
+            "credentials": {"access_token": "ghp_another_test_secret"},
+        },
+    )
+    assert created.status_code == 201, created.text
+    with session_factory() as db:
+        db.get(IntegrationConnection, created.json()["id"]).status = "connected"
+        db.commit()
+    planned = client.post(
+        f"/api/v1/workspaces/{workspace_id}/agent/incident-response",
+        headers=headers,
+        json={"incident_id": incident_id, "integration_ids": [created.json()["id"]]},
+    )
+    assert planned.status_code == 201, planned.text
+    class FakeQueue:
+        def __init__(self, *_args, **_kwargs):
+            pass
+        def enqueue(self, *_args, **_kwargs):
+            pass
+    monkeypatch.setattr(api, "Queue", FakeQueue)
+    approved = client.post(
+        f"/api/v1/workspaces/{workspace_id}/agent/runs/{planned.json()['id']}/approve",
+        headers=headers,
+    )
+    assert approved.status_code == 202
+    from dhqa_api import agent_worker
+    monkeypatch.setattr(agent_worker, "SessionLocal", session_factory)
+    monkeypatch.setattr(
+        agent_worker, "execute_action",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("connector unavailable")),
+    )
+    result = agent_worker.execute_agent_workflow(planned.json()["id"])
+    assert result["status"] == "partial_failed"
+    detail = client.get(
+        f"/api/v1/workspaces/{workspace_id}/agent/runs/{planned.json()['id']}",
+        headers=headers,
+    ).json()
+    assert [step["status"] for step in detail["steps"]] == ["completed", "failed"]
