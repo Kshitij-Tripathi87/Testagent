@@ -135,7 +135,7 @@ jobs:
           root = Path("/app/var/uploads") / workspace_id / "ci-smoke"
           root.mkdir(parents=True, exist_ok=True)
           csv_path = root / "orders.csv"
-          content = b"id\\n\\n2\\n"
+          content = bytes([105, 100, 10, 78, 85, 76, 76, 10, 50, 10])
           csv_path.write_bytes(content)
 
           with SessionLocal() as db:
