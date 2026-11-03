@@ -146,3 +146,26 @@ input:focus,select:focus { border-color:#5bbf9c; box-shadow:0 0 0 3px #5bbf9c20;
 .upstream-list { display:grid; gap:8px; border-top:1px solid var(--line); margin-top:14px; padding-top:13px; }
 .upstream-list strong { font-size:11px; color:#cbd9e8; }
 .upstream-list span { display:flex; gap:8px; align-items:flex-start; color:#91a8c1; font-size:10px; overflow-wrap:anywhere; }
+
+.incident-inbox { display:grid; gap:12px; }
+.incident-inbox-card { border:1px solid #3d3540; background:#171a27; border-radius:10px; padding:13px; }
+.incident-inbox-heading { display:flex; align-items:center; gap:10px; }
+.incident-symbol { width:33px; height:33px; border-radius:9px; display:grid; place-items:center; color:#ffb49f; background:#302128; }
+.incident-inbox-heading strong { display:block; font-size:12px; color:#f0e6e8; }
+.incident-inbox-heading small { display:block; font-size:9px; color:#9f9aaa; margin-top:4px; }
+.incident-inbox-card>p { font-size:11px; color:#c2b6bd; line-height:1.6; margin:12px 0; }
+.origin-row { display:flex; align-items:center; flex-wrap:wrap; gap:7px; border-top:1px solid #383141; padding-top:10px; color:#d7b5ab; font-size:10px; }
+.origin-row code { color:#a9c6ed; overflow-wrap:anywhere; }
+.trace-list { display:grid; gap:8px; margin-top:11px; padding:11px; border:1px solid #323449; border-radius:8px; background:#101625; }
+.trace-hop { display:grid; grid-template-columns:8px minmax(120px,1fr) minmax(150px,1.5fr); align-items:start; gap:8px; font-size:9px; }
+.trace-dot { width:7px; height:7px; border-radius:50%; margin-top:2px; }
+.trace-dot.clean { background:#68d7aa; }
+.trace-dot.broken { background:#ff8795; }
+.trace-dot.unknown { background:#d3b86a; }
+.trace-urn { color:#c1d0e2; overflow-wrap:anywhere; }
+.trace-evidence { color:#8496ad; line-height:1.45; }
+.incident-actions { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
+.version-history { margin-bottom:14px; border:1px solid #2b4056; background:#0b1624; border-radius:9px; padding:12px; display:grid; gap:8px; }
+.version-history>strong { font-size:11px; color:#cdd9e8; }
+.version-row { display:grid; grid-template-columns:45px minmax(0,1fr) auto; gap:10px; align-items:center; border-top:1px solid #253449; padding-top:8px; font-size:10px; color:#aebed1; }
+.version-row small { color:#7d91aa; font-size:9px; }
