@@ -29,3 +29,13 @@ def test_empty_dev_identity_is_rejected(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         current_identity(credentials=None, x_dev_user=" ")
     assert exc.value.status_code == 400
+
+
+def test_hosted_auth_fails_closed_without_jwks_and_issuer(monkeypatch):
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "dev_auth_enabled", False)
+    monkeypatch.setattr(settings, "supabase_jwks_url", None)
+    monkeypatch.setattr(settings, "supabase_issuer", None)
+    with pytest.raises(HTTPException) as exc:
+        current_identity(credentials=None, x_dev_user="local-user")
+    assert exc.value.status_code == 503
