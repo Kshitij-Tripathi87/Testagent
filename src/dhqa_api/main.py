@@ -621,6 +621,29 @@ def create_quality_run(
     )
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found for this dataset")
+    # Referential checks must never report missing source data as a data-quality
+    # failure. Require a matching upload for each immediate upstream first.
+    for constraint in (dataset.contract_json or {}).get("constraints", []):
+        if constraint.get("kind") != "referential":
+            continue
+        upstream_urn = constraint.get("ref_urn")
+        upstream = db.scalar(
+            select(Dataset).where(
+                Dataset.workspace_id == workspace_id,
+                Dataset.urn == upstream_urn,
+            )
+        )
+        upstream_upload = db.scalar(
+            select(DatasetUpload)
+            .where(DatasetUpload.dataset_id == upstream.id)
+            .order_by(DatasetUpload.created_at.desc())
+            .limit(1)
+        ) if upstream else None
+        if not upstream_upload:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Upload row data for upstream dataset {upstream_urn} before running this referential check",
+            )
     run = QualityRun(
         workspace_id=workspace_id,
         dataset_id=dataset.id,
