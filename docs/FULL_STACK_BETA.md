@@ -38,7 +38,7 @@ The DataHub connection is an outbound server-side request. In non-development en
 6. Start the stack:
 
    ```bash
-   docker compose -f infra/docker-compose.app.yml up --build
+   docker compose --env-file .env -f infra/docker-compose.app.yml up --build
    ```
 
 7. Open http://localhost:3000. The API is available at http://localhost:8000; interactive API documentation is at http://localhost:8000/docs.
