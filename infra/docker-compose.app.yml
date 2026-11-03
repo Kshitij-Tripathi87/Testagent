@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: testagent
       POSTGRES_USER: testagent
-      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:-testagent-local-only}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-testagent-local-only}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -31,17 +31,17 @@ services:
       context: ..
       dockerfile: infra/Dockerfile.api
     environment:
-      APP_ENV: \${APP_ENV:-development}
-      DATABASE_URL: postgresql+psycopg://testagent:\${POSTGRES_PASSWORD:-testagent-local-only}@postgres:5432/testagent
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://testagent:${POSTGRES_PASSWORD:-testagent-local-only}@postgres:5432/testagent
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/var/uploads
-      APP_ENCRYPTION_KEY: \${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY in .env}
-      SUPABASE_JWKS_URL: \${SUPABASE_JWKS_URL:-}
-      SUPABASE_ISSUER: \${SUPABASE_ISSUER:-}
-      SUPABASE_AUDIENCE: \${SUPABASE_AUDIENCE:-authenticated}
-      DEV_AUTH_ENABLED: \${DEV_AUTH_ENABLED:-true}
-      CORS_ORIGINS: \${CORS_ORIGINS:-http://localhost:3000}
-      DATAHUB_ALLOWED_HOSTS: \${DATAHUB_ALLOWED_HOSTS:-}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY in .env}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL:-}
+      SUPABASE_ISSUER: ${SUPABASE_ISSUER:-}
+      SUPABASE_AUDIENCE: ${SUPABASE_AUDIENCE:-authenticated}
+      DEV_AUTH_ENABLED: ${DEV_AUTH_ENABLED:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      DATAHUB_ALLOWED_HOSTS: ${DATAHUB_ALLOWED_HOSTS:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["sh", "-c", "alembic upgrade head && uvicorn dhqa_api.main:app --host 0.0.0.0 --port 8000"]
@@ -64,13 +64,13 @@ services:
       - "host.docker.internal:host-gateway"
     command: ["rq", "worker", "--url", "redis://redis:6379/0", "testagent"]
     environment:
-      APP_ENV: \${APP_ENV:-development}
-      DATABASE_URL: postgresql+psycopg://testagent:\${POSTGRES_PASSWORD:-testagent-local-only}@postgres:5432/testagent
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://testagent:${POSTGRES_PASSWORD:-testagent-local-only}@postgres:5432/testagent
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /app/var/uploads
-      APP_ENCRYPTION_KEY: \${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY in .env}
-      MAX_UPLOAD_MB: \${MAX_UPLOAD_MB:-25}
-      MAX_LINEAGE_HOPS: \${MAX_LINEAGE_HOPS:-5}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY in .env}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      MAX_LINEAGE_HOPS: ${MAX_LINEAGE_HOPS:-5}
     volumes:
       - uploads:/app/var/uploads
     depends_on:
@@ -85,10 +85,10 @@ services:
       context: ..
       dockerfile: infra/Dockerfile.web
       args:
-        NEXT_PUBLIC_API_URL: \${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_SUPABASE_URL: \${NEXT_PUBLIC_SUPABASE_URL:-}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: \${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
-        NEXT_PUBLIC_DEV_USER: \${NEXT_PUBLIC_DEV_USER:-local-beta-user}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+        NEXT_PUBLIC_DEV_USER: ${NEXT_PUBLIC_DEV_USER:-local-beta-user}
     ports:
       - "3000:3000"
     depends_on:
