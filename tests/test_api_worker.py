@@ -50,8 +50,8 @@ def test_worker_persists_failed_checks_incident_lineage_and_artifacts(tmp_path, 
     child_urn = "urn:li:dataset:(urn:li:dataPlatform:snowflake,marts.child,PROD)"
     parent_csv = tmp_path / "parent.csv"
     child_csv = tmp_path / "child.csv"
-    parent_csv.write_text("id\n\n2\n", encoding="utf-8")
-    child_csv.write_text("id\n\n3\n", encoding="utf-8")
+    parent_csv.write_text("id\nNULL\n2\n", encoding="utf-8")
+    child_csv.write_text("id\nNULL\n3\n", encoding="utf-8")
 
     with TestingSession() as db:
         workspace = Workspace(name="Worker test", created_by="tester")
