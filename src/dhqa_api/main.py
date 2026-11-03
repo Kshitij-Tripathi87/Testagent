@@ -413,10 +413,12 @@ def sync_catalog(
                 row.connection_id = connection_id
                 row.name = metadata["name"]
                 row.metadata_json = metadata
-                # Version 1 is still the auto-inferred contract. Preserve edited
-                # contracts (version 2+) and refresh the inferred baseline on sync.
+                # Refresh the schema/lineage snapshot on every sync. Preserve
+                # user-authored constraints and SLA overrides, and create a new
+                # contract version if the refreshed snapshot materially changes.
+                inferred_contract = contract_to_dict(contract)
                 if row.contract_version <= 1:
-                    row.contract_json = contract_to_dict(contract)
+                    row.contract_json = inferred_contract
                     baseline = db.scalar(
                         select(ContractVersion).where(
                             ContractVersion.dataset_id == row.id,
@@ -424,7 +426,29 @@ def sync_catalog(
                         )
                     )
                     if baseline:
-                        baseline.contract_json = row.contract_json
+                        baseline.contract_json = inferred_contract
+                else:
+                    saved_contract = row.contract_json or {}
+                    refreshed_contract = {
+                        **inferred_contract,
+                        "constraints": saved_contract.get(
+                            "constraints", inferred_contract["constraints"]
+                        ),
+                        "max_staleness_hours": saved_contract.get(
+                            "max_staleness_hours", inferred_contract["max_staleness_hours"]
+                        ),
+                    }
+                    if refreshed_contract != saved_contract:
+                        row.contract_version += 1
+                        row.contract_json = refreshed_contract
+                        db.add(
+                            ContractVersion(
+                                dataset_id=row.id,
+                                version=row.contract_version,
+                                contract_json=refreshed_contract,
+                                created_by=identity_subject(identity),
+                            )
+                        )
             row.synced_at = utcnow()
             synced += 1
         connection.status = "connected"
