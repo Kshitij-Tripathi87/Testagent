@@ -52,3 +52,14 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:8000
           NEXT_PUBLIC_DEV_USER: ci-test-user
         run: npm run build
+
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate application Compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          APP_ENCRYPTION_KEY: ci-placeholder-only
+        run: docker compose -f infra/docker-compose.app.yml config --quiet
