@@ -30,6 +30,12 @@ type Run = {
   artifacts?: Array<{id:string;kind:string;file_name:string}>;
 };
 type Connection = { id:string; name:string; gms_url:string; status:string };
+type Incident = {
+  id:string; run_id:string; dataset_id:string; title:string; status:string;
+  details:{origin_urn?:string;hop_distance?:number;summary?:string;trace?:Array<{urn:string;checked:boolean;passed:boolean|null;detail:string;path?:string[]}>};
+  created_at?:string;
+};
+type ContractVersion = {id:string;version:number;contract:unknown;created_by:string;created_at?:string};
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(" ");
 
@@ -48,7 +54,10 @@ export default function Home() {
   const [editingContract, setEditingContract] = useState(false);
   const [contractDraft, setContractDraft] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedRun, setSelectedRun] = useState<Run | null>(null);
+  const [contractVersions, setContractVersions] = useState<ContractVersion[]>([]);
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const [connectionName, setConnectionName] = useState("Production DataHub");
   const [gmsUrl, setGmsUrl] = useState("http://host.docker.internal:8080");
   const [token, setToken] = useState("");
@@ -78,14 +87,16 @@ export default function Home() {
 
   const loadWorkspace = useCallback(async (id: string) => {
     if (!id) return;
-    const [connectionRows, datasetRows, runRows] = await Promise.all([
+    const [connectionRows, datasetRows, runRows, incidentRows] = await Promise.all([
       apiRequest<Connection[]>("/api/v1/workspaces/" + id + "/connections", credentials),
       apiRequest<Dataset[]>("/api/v1/workspaces/" + id + "/datasets", credentials),
       apiRequest<Run[]>("/api/v1/workspaces/" + id + "/runs", credentials),
+      apiRequest<Incident[]>("/api/v1/workspaces/" + id + "/incidents", credentials),
     ]);
     setConnections(connectionRows);
     setDatasets(datasetRows);
     setRuns(runRows);
+    setIncidents(incidentRows);
   }, [credentials]);
 
   const loadWorkspaces = useCallback(async () => {
@@ -243,6 +254,40 @@ export default function Home() {
     finally { setBusy(""); }
   }
 
+  async function updateIncidentStatus(incidentId: string, nextStatus: "open" | "acknowledged" | "resolved") {
+    if (!workspaceId) return;
+    setBusy("incident:" + incidentId); setError("");
+    try {
+      await apiRequest("/api/v1/workspaces/" + workspaceId + "/incidents/" + incidentId, {
+        ...credentials, method: "PATCH", body: JSON.stringify({status: nextStatus}),
+      });
+      setIncidents((items)=>items.map((item)=>item.id===incidentId?{...item,status:nextStatus}:item));
+      setMessage("Incident updated.");
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function toggleContractVersions() {
+    if (!workspaceId || !selectedDataset) return;
+    if (versionsOpen) { setVersionsOpen(false); return; }
+    setBusy("versions"); setError("");
+    try {
+      const rows = await apiRequest<ContractVersion[]>(
+        "/api/v1/workspaces/" + workspaceId + "/datasets/" + selectedDataset + "/contract/versions",
+        credentials,
+      );
+      setContractVersions(rows);
+      setVersionsOpen(true);
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function signOut() {
     if (supabase) await supabase.auth.signOut();
     setSession(null); setWorkspaceId(""); setWorkspaces([]);
@@ -322,7 +367,7 @@ export default function Home() {
               <div className="metric-grid">
                 <Metric icon={<Database size={18}/>} label="Catalog datasets" value={String(datasets.length)} hint="Synced from DataHub"/>
                 <Metric icon={<Play size={18}/>} label="Quality runs" value={String(runs.length)} hint="Saved execution history"/>
-                <Metric icon={<AlertTriangle size={18}/>} label="Open incidents" value={String(runs.reduce((sum,r)=>sum+(r.summary?.incidents||0),0))} hint="Across recent runs"/>
+                <Metric icon={<AlertTriangle size={18}/>} label="Open incidents" value={String(incidents.filter((incident)=>incident.status!=="resolved").length)} hint="Unresolved investigations"/>
                 <Metric icon={<ShieldCheck size={18}/>} label="Contracts" value={String(datasets.length)} hint="One per synced dataset"/>
               </div>
 
@@ -371,7 +416,11 @@ export default function Home() {
               </section>
 
               {detail && <section className="panel">
-                <div className="panel-heading"><div><span className="eyebrow">DATASET CONTRACT</span><h3>{detail.name}</h3><p className="muted mono">{detail.urn}</p></div><div className="top-actions"><span className="count-tag">Version {detail.contract_version}</span><button className="small-button" onClick={()=>setEditingContract((value)=>!value)}>{editingContract?"Cancel":"Edit contract"}</button></div></div>
+                <div className="panel-heading"><div><span className="eyebrow">DATASET CONTRACT</span><h3>{detail.name}</h3><p className="muted mono">{detail.urn}</p></div><div className="top-actions"><span className="count-tag">Version {detail.contract_version}</span><button className="small-button" onClick={toggleContractVersions} disabled={busy==="versions"}>{versionsOpen?"Hide history":"Version history"}</button><button className="small-button" onClick={()=>setEditingContract((value)=>!value)}>{editingContract?"Cancel":"Edit contract"}</button></div></div>
+                {versionsOpen && <div className="version-history">
+                  <strong>Saved contract versions</strong>
+                  {contractVersions.map((version)=><div className="version-row" key={version.id}><span>v{version.version}</span><span>{version.created_by}</span><small>{version.created_at?new Date(version.created_at).toLocaleString():""}</small></div>)}
+                </div>}
                 {editingContract ? (
                   <div className="stack">
                     <p className="muted small-copy">Edit the contract JSON. Allowed constraint kinds: not_null, unique, referential and freshness. Referential rules must target a declared upstream URN.</p>
@@ -398,6 +447,29 @@ export default function Home() {
                   </>
                 )}
               </section>}
+
+              <section className="panel">
+                <div className="panel-heading"><div><span className="eyebrow">INVESTIGATION QUEUE</span><h3>Incidents & lineage findings</h3></div><span className="count-tag">{incidents.filter((incident)=>incident.status!=="resolved").length} open</span></div>
+                {incidents.length ? <div className="incident-inbox">
+                  {incidents.map((incident)=><article className="incident-inbox-card" key={incident.id}>
+                    <div className="incident-inbox-heading"><div className="incident-symbol"><AlertTriangle size={16}/></div><div className="grow"><strong>{incident.title}</strong><small>{datasets.find((d)=>d.id===incident.dataset_id)?.name||"Dataset"} · {incident.created_at?new Date(incident.created_at).toLocaleString():"Recent"}</small></div><span className={cx("state-tag",incident.status==="resolved"?"good":incident.status==="acknowledged"?"pending":"bad")}>{incident.status}</span></div>
+                    <p>{incident.details.summary||"Root-cause evidence has been recorded for this failed contract check."}</p>
+                    {incident.details.origin_urn && <div className="origin-row"><GitBranch size={14}/><span>Deepest confirmed failing ancestor</span><code>{incident.details.origin_urn}</code></div>}
+                    {(incident.details.trace||[]).length>0 && <div className="trace-list">
+                      {(incident.details.trace||[]).map((hop,index)=><div className="trace-hop" key={index}>
+                        <span className={cx("trace-dot",!hop.checked?"unknown":hop.passed?"clean":"broken")}/>
+                        <span className="trace-urn">{hop.urn}</span>
+                        <span className="trace-evidence">{!hop.checked?"Unverified":hop.passed?"Check passed":"Check failed"} · {hop.detail}</span>
+                      </div>)}
+                    </div>}
+                    <div className="incident-actions">
+                      <button className="small-button" disabled={busy==="incident:"+incident.id||incident.status==="acknowledged"} onClick={()=>updateIncidentStatus(incident.id,"acknowledged")}>Acknowledge</button>
+                      <button className="small-button" disabled={busy==="incident:"+incident.id||incident.status==="resolved"} onClick={()=>updateIncidentStatus(incident.id,"resolved")}>Resolve</button>
+                      {incident.status!=="open"&&<button className="small-button" disabled={busy==="incident:"+incident.id} onClick={()=>updateIncidentStatus(incident.id,"open")}>Reopen</button>}
+                    </div>
+                  </article>)}
+                </div> : <div className="empty-state"><ShieldCheck size={26}/><strong>No incidents to investigate</strong><p>Failed checks and their lineage evidence will appear here.</p></div>}
+              </section>
 
               <section className="panel">
                 <div className="panel-heading"><div><span className="eyebrow">HISTORY</span><h3>Recent quality runs</h3></div><span className="count-tag">{runs.length} saved</span></div>
