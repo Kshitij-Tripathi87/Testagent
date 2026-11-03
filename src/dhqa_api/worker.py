@@ -223,7 +223,7 @@ def execute_quality_run(run_id: str) -> dict[str, Any]:
                     failing_check=result,
                     origin_urn=report["origin_urn"],
                     hop_distance=report["hop_distance"],
-                    trace=report["trace"],
+                    trace=[hop for hop in report["trace"] if hop.get("checked")],
                 )
                 _save_artifact(
                     db,
