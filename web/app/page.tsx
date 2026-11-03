@@ -64,6 +64,7 @@ export default function Home() {
   const [gmsUrl, setGmsUrl] = useState("http://host.docker.internal:8080");
   const [token, setToken] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [preloadedUpload, setPreloadedUpload] = useState<{datasetId:string;upload:UploadInfo}|null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -186,7 +187,8 @@ export default function Home() {
       });
       await loadWorkspace(workspaceId);
       setSelectedDataset(created.id);
-      setFile(localDatasetFile);
+      setFile(null);
+      setPreloadedUpload({datasetId:created.id,upload:created.upload});
       setLocalDatasetFile(null);
       setMessage("Local dataset created. Review its contract, then run a quality check.");
     } catch (reason) {
@@ -248,21 +250,26 @@ export default function Home() {
 
   async function uploadAndRun(event: FormEvent) {
     event.preventDefault();
-    if (!workspaceId || !selectedDataset || !file) return;
+    if (!workspaceId || !selectedDataset || (!file && preloadedUpload?.datasetId !== selectedDataset)) return;
     setBusy("run"); setError(""); setMessage("");
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const uploaded = await apiRequest<UploadInfo>(
-        "/api/v1/workspaces/" + workspaceId + "/datasets/" + selectedDataset + "/uploads",
-        { ...credentials, method: "POST", body: form },
-      );
+      let uploaded = preloadedUpload?.datasetId === selectedDataset ? preloadedUpload.upload : null;
+      if (!uploaded && file) {
+        const form = new FormData();
+        form.append("file", file);
+        uploaded = await apiRequest<UploadInfo>(
+          "/api/v1/workspaces/" + workspaceId + "/datasets/" + selectedDataset + "/uploads",
+          { ...credentials, method: "POST", body: form },
+        );
+      }
+      if (!uploaded) throw new Error("Select a CSV upload before running checks.");
       const queued = await apiRequest<Run>("/api/v1/workspaces/" + workspaceId + "/runs", {
         ...credentials, method: "POST",
         body: JSON.stringify({ dataset_id: selectedDataset, upload_id: uploaded.id }),
       });
       setSelectedRun(queued);
       setFile(null);
+      setPreloadedUpload(null);
       setMessage("Quality run queued. Results will appear here automatically.");
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(""); }
@@ -438,7 +445,7 @@ export default function Home() {
                         {datasets.map((dataset)=><option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
                       </select></label>
                       <label className="upload-zone"><Upload size={20}/><strong>{file ? file.name : "Choose a CSV file"}</strong><span>{file ? (file.size/1024).toFixed(1)+" KB" : "Up to 25 MB · dataset rows used for this run"}</span><input type="file" accept=".csv,text/csv" onChange={(e)=>setFile(e.target.files?.[0]||null)}/></label>
-                      <button className="primary-button" disabled={!selectedDataset||!file||busy==="run"||Boolean(selectedRun&&["queued","running"].includes(selectedRun.status))}>{busy==="run"?<Loader2 className="spin" size={16}/>:<Play size={16}/>} Upload & execute checks</button>
+                      <button className="primary-button" disabled={!selectedDataset||(!file&&preloadedUpload?.datasetId!==selectedDataset)||busy==="run"||Boolean(selectedRun&&["queued","running"].includes(selectedRun.status))}>{busy==="run"?<Loader2 className="spin" size={16}/>:<Play size={16}/>} Upload & execute checks</button>
                     </form>
                   ) : <div className="empty-inline"><CircleDashed size={22}/><p>Sync a DataHub catalog to select a dataset for quality checks.</p></div>}
                 </section>

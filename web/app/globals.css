@@ -227,3 +227,5 @@ input:focus,select:focus { border-color:#5bbf9c; box-shadow:0 0 0 3px #5bbf9c20;
   .agent-sidebar .sidebar-bottom { display:none; }
   .agent-form-footer,.agent-approve-row { align-items:flex-start; }
 }
+
+.row-gap-actions { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }

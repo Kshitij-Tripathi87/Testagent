@@ -190,6 +190,23 @@ export default function AgentPage() {
     } finally { setBusy(""); }
   }
 
+  async function testIntegration(id: string) {
+    setBusy("test:" + id); setError(""); setMessage("");
+    try {
+      const result = await apiRequest<{status:string}>(
+        "/api/v1/workspaces/" + workspaceId + "/integrations/" + id + "/test",
+        { ...credentials, method: "POST" },
+      );
+      await loadWorkspaceData(workspaceId);
+      setMessage("Connector test passed (" + result.status + ").");
+    } catch (reason) {
+      setError((reason as Error).message);
+      await loadWorkspaceData(workspaceId).catch(() => undefined);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function deleteIntegration(id: string) {
     setBusy("delete:" + id); setError("");
     try {
@@ -336,7 +353,10 @@ export default function AgentPage() {
                       </div>
                       <div className="agent-connector-actions">
                         <span className="muted small-copy">{item.last_tested_at ? "Tested " + new Date(item.last_tested_at).toLocaleString() : "Not tested"}</span>
-                        <button className="small-button" onClick={()=>deleteIntegration(item.id)} disabled={busy==="delete:"+item.id}><Trash2 size={13}/> Remove</button>
+                        <div className="row-gap-actions">
+                          <button className="small-button" onClick={()=>testIntegration(item.id)} disabled={busy==="test:"+item.id}>{busy==="test:"+item.id?<Loader2 className="spin" size={13}/>:<RefreshCw size={13}/>} Test again</button>
+                          <button className="small-button" onClick={()=>deleteIntegration(item.id)} disabled={busy==="delete:"+item.id}><Trash2 size={13}/> Remove</button>
+                        </div>
                       </div>
                     </article>
                   ))}
