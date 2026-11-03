@@ -42,6 +42,7 @@ services:
       DEV_AUTH_ENABLED: ${DEV_AUTH_ENABLED:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       DATAHUB_ALLOWED_HOSTS: ${DATAHUB_ALLOWED_HOSTS:-}
+      DATAHUB_WRITEBACK_ENABLED: ${DATAHUB_WRITEBACK_ENABLED:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["sh", "-c", "alembic upgrade head && uvicorn dhqa_api.main:app --host 0.0.0.0 --port 8000"]
@@ -71,6 +72,7 @@ services:
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY in .env}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       MAX_LINEAGE_HOPS: ${MAX_LINEAGE_HOPS:-5}
+      DATAHUB_WRITEBACK_ENABLED: ${DATAHUB_WRITEBACK_ENABLED:-false}
     volumes:
       - uploads:/app/var/uploads
     depends_on:
