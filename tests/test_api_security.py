@@ -18,6 +18,8 @@ def test_dev_identity_header_is_accepted_only_in_development(monkeypatch):
 def test_dev_identity_header_is_rejected_outside_development(monkeypatch):
     monkeypatch.setattr(settings, "app_env", "production")
     monkeypatch.setattr(settings, "dev_auth_enabled", True)
+    monkeypatch.setattr(settings, "supabase_jwks_url", "https://auth.example.test/jwks")
+    monkeypatch.setattr(settings, "supabase_issuer", "https://auth.example.test")
     with pytest.raises(HTTPException) as exc:
         current_identity(credentials=None, x_dev_user="qa-tester")
     assert exc.value.status_code == 401
