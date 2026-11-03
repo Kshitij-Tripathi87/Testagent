@@ -29,17 +29,17 @@ The DataHub connection is an outbound server-side request. In non-development en
 2. Copy infra/.env.example to the repository root as .env.
 3. Generate an encryption key:
 
-   \`\`\`bash
+   ```bash
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-   \`\`\`
+   ```
 
 4. Set the generated value as APP_ENCRYPTION_KEY in .env.
 5. For a local-only session, keep APP_ENV=development, DEV_AUTH_ENABLED=true, and NEXT_PUBLIC_DEV_USER=local-beta-user.
 6. Start the stack:
 
-   \`\`\`bash
+   ```bash
    docker compose -f infra/docker-compose.app.yml up --build
-   \`\`\`
+   ```
 
 7. Open http://localhost:3000. The API is available at http://localhost:8000; interactive API documentation is at http://localhost:8000/docs.
 
@@ -92,27 +92,27 @@ Liveness and readiness endpoints are /healthz and /readyz.
 
 Install the application and development extras:
 
-   \`\`\`bash
+   ```bash
    python -m venv .venv
    # activate the virtual environment
    pip install -e ".[app,dev]"
    alembic upgrade head
    uvicorn dhqa_api.main:app --reload
-   \`\`\`
+   ```
 
 Run a Redis server separately, then start a worker in another terminal:
 
-   \`\`\`bash
+   ```bash
    rq worker --url redis://localhost:6379/0 testagent
-   \`\`\`
+   ```
 
 For frontend development:
 
-   \`\`\`bash
+   ```bash
    cd web
    npm install
    npm run dev
-   \`\`\`
+   ```
 
 Set the required environment variables in the repository-root .env. For a local frontend/API connection set NEXT_PUBLIC_API_URL=http://localhost:8000 and NEXT_PUBLIC_DEV_USER=local-beta-user.
 
