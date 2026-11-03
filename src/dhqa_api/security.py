@@ -29,6 +29,14 @@ def current_identity(
             raise HTTPException(status_code=400, detail="Invalid development identity")
         return {"sub": subject, "email": None, "role": "authenticated"}
 
+    if settings.app_env != "development" and (
+        not settings.supabase_jwks_url or not settings.supabase_issuer
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Hosted authentication is not configured: SUPABASE_JWKS_URL and SUPABASE_ISSUER are required",
+        )
+
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required")
 
