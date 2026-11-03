@@ -280,7 +280,15 @@ class DataHubMCPClient:
                 raise RuntimeError(
                     f"DataHub GraphQL returned {resp.status}: {body}"
                 )
-            return await resp.json()
+            payload = await resp.json()
+            errors = payload.get("errors") or []
+            if errors:
+                message = "; ".join(
+                    str(error.get("message", "GraphQL error"))
+                    for error in errors
+                )
+                raise RuntimeError(f"DataHub GraphQL error: {message}")
+            return payload
 
     async def _get_dataset_graphql(self, urn: str) -> DatasetSnapshot:
         result = await self._execute_graphql(_GET_DATASET, {"urn": urn})
