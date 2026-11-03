@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   Activity, AlertTriangle, ArrowRight, Bot, CheckCircle2, ChevronRight,
@@ -22,7 +23,7 @@ type DatasetDetail = {
   contract_version: number; uploads: UploadInfo[];
 };
 type Run = {
-  id: string; dataset_id: string; status: string; passed: boolean | null;
+  id: string; dataset_id: string; status: string; passed: boolean | null; created_at?: string;
   summary: {total_checks?:number;passed_checks?:number;failed_checks?:number;incidents?:number;row_count?:number};
   error_message?: string; checks?: Array<{check_id:string;kind:string;column?:string;passed:boolean;detail:string}>;
   incidents?: Array<{id:string;title:string;status:string;details:{origin_urn?:string;summary?:string;trace?:Array<{urn:string;passed:boolean|null;detail:string;checked:boolean}>}}>;
@@ -125,7 +126,7 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [selectedRun?.id, selectedRun?.status, refreshRun]);
 
-  async function signIn(event: React.FormEvent) {
+  async function signIn(event: FormEvent) {
     event.preventDefault();
     if (!supabase) return;
     setBusy("auth"); setError(""); setMessage("");
@@ -368,7 +369,7 @@ export default function Home() {
   );
 }
 
-function Metric({icon,label,value,hint}:{icon?:React.ReactNode;label:string;value:string;hint:string}) {
+function Metric({icon,label,value,hint}:{icon?:ReactNode;label:string;value:string;hint:string}) {
   return <div className="metric-card"><div className="metric-top">{icon&&<span className="metric-icon">{icon}</span>}<span>{label}</span></div><strong>{value}</strong><small>{hint}</small></div>;
 }
 function RunStatus({status,passed}:{status:string;passed:boolean|null}) {
