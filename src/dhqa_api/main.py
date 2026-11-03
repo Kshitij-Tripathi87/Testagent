@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pandas as pd
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
@@ -108,6 +109,19 @@ def _dataset(db: Session, workspace_id: str, dataset_id: str) -> Dataset:
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
     return dataset
+
+
+def _validate_gms_url(gms_url: str) -> None:
+    parsed = urlsplit(gms_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status_code=422, detail="A valid HTTP(S) DataHub URL is required")
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=422, detail="Do not embed credentials in the DataHub URL")
+    if settings.app_env != "development" and parsed.hostname.lower() not in settings.allowed_datahub_hosts:
+        raise HTTPException(
+            status_code=422,
+            detail="This DataHub host is not allowlisted. Configure DATAHUB_ALLOWED_HOSTS for the beta deployment.",
+        )
 
 
 def _connection_client(connection: DataConnection) -> DataHubGraphQL:
@@ -238,6 +252,7 @@ def create_connection(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     ensure_workspace(db, workspace_id, identity)
+    _validate_gms_url(body.gms_url)
     try:
         encrypted_token = encrypt_secret(body.token)
     except RuntimeError as exc:
@@ -370,9 +385,18 @@ def sync_catalog(
                 row.connection_id = connection_id
                 row.name = metadata["name"]
                 row.metadata_json = metadata
-                # Refresh inferred contract only when the user has not saved an override.
-                if not row.contract_json:
+                # Version 1 is still the auto-inferred contract. Preserve edited
+                # contracts (version 2+) and refresh the inferred baseline on sync.
+                if row.contract_version <= 1:
                     row.contract_json = contract_to_dict(contract)
+                    baseline = db.scalar(
+                        select(ContractVersion).where(
+                            ContractVersion.dataset_id == row.id,
+                            ContractVersion.version == 1,
+                        )
+                    )
+                    if baseline:
+                        baseline.contract_json = row.contract_json
             row.synced_at = utcnow()
             synced += 1
         connection.status = "connected"
