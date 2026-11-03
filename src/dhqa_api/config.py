@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     dev_auth_enabled: bool = True
     cors_origins: str = "http://localhost:3000"
     datahub_allowed_hosts: str = ""
+    datahub_writeback_enabled: bool = False
     auto_create_schema: bool = False
 
     @property
