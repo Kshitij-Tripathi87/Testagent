@@ -180,7 +180,35 @@ export default function Home() {
     finally { setBusy(""); }
   }
 
-  async function uploadAndRun(event: React.FormEvent) {
+  async function saveContract() {
+    if (!workspaceId || !selectedDataset) return;
+    setBusy("contract"); setError("");
+    try {
+      const parsed = JSON.parse(contractDraft);
+      await apiRequest("/api/v1/workspaces/" + workspaceId + "/datasets/" + selectedDataset + "/contract", {
+        ...credentials,
+        method: "PUT",
+        body: JSON.stringify({
+          constraints: parsed.constraints || [],
+          max_staleness_hours: parsed.max_staleness_hours || 24,
+        }),
+      });
+      const refreshed = await apiRequest<DatasetDetail>(
+        "/api/v1/workspaces/" + workspaceId + "/datasets/" + selectedDataset,
+        credentials,
+      );
+      setDetail(refreshed);
+      setContractDraft(JSON.stringify(refreshed.contract, null, 2));
+      setEditingContract(false);
+      setMessage("Contract saved as version " + refreshed.contract_version + ".");
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function uploadAndRun(event: FormEvent) {
     event.preventDefault();
     if (!workspaceId || !selectedDataset || !file) return;
     setBusy("run"); setError(""); setMessage("");
