@@ -174,6 +174,35 @@ def test_worker_persists_failed_checks_incident_lineage_and_artifacts(tmp_path, 
         assert len(writeback_calls[0][2]) == 1
         assert len(writeback_calls[0][3]) == 1
 
+        with TestingSession() as db:
+            retry_run = QualityRun(
+                workspace_id=next(iter(db.scalars(select(Workspace))).id for _ in [0]),
+                dataset_id=child_dataset_id,
+                upload_id=db.scalar(
+                    select(DatasetUpload).where(DatasetUpload.dataset_id == child_dataset_id)
+                ).id,
+                status="queued",
+                created_by="tester",
+            )
+            db.add(retry_run)
+            db.commit()
+            retry_run_id = retry_run.id
+
+        def failing_writeback(*_args):
+            raise RuntimeError("DataHub mutation permission denied")
+
+        monkeypatch.setattr(worker, "_writeback_to_datahub", failing_writeback)
+        retry_result = worker.execute_quality_run(retry_run_id)
+        assert retry_result["status"] == "completed"
+        assert retry_result["writeback"]["status"] == "failed"
+        assert "permission denied" in retry_result["writeback"]["error"]
+
+        with TestingSession() as db:
+            persisted_retry = db.get(QualityRun, retry_run_id)
+            assert persisted_retry is not None
+            assert persisted_retry.status == "completed"
+            assert persisted_retry.summary_json["writeback"]["status"] == "failed"
+
         repeated = worker.execute_quality_run(run_id)
         assert repeated["idempotent"] is True
     finally:
