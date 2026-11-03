@@ -88,7 +88,7 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
-        NEXT_PUBLIC_DEV_USER: ${NEXT_PUBLIC_DEV_USER:-local-beta-user}
+        NEXT_PUBLIC_DEV_USER: ${NEXT_PUBLIC_DEV_USER:-}
     ports:
       - "3000:3000"
     depends_on:
