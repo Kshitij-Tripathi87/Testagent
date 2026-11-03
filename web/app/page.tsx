@@ -6,7 +6,7 @@ import type { Session } from "@supabase/supabase-js";
 import {
   Activity, AlertTriangle, ArrowRight, Bot, CheckCircle2, ChevronRight,
   CircleDashed, Cloud, Database, Download, GitBranch, Layers3, Loader2,
-  LogOut, Play, Plus, RefreshCw, ShieldCheck, Upload, XCircle,
+  LogOut, Play, Plus, RefreshCw, Save, ShieldCheck, Upload, XCircle,
 } from "lucide-react";
 import { apiRequest, downloadArtifact } from "../lib/api";
 import { getSupabase } from "../lib/supabase";
@@ -45,6 +45,8 @@ export default function Home() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDataset, setSelectedDataset] = useState("");
   const [detail, setDetail] = useState<DatasetDetail | null>(null);
+  const [editingContract, setEditingContract] = useState(false);
+  const [contractDraft, setContractDraft] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
   const [selectedRun, setSelectedRun] = useState<Run | null>(null);
   const [connectionName, setConnectionName] = useState("Production DataHub");
@@ -105,7 +107,11 @@ export default function Home() {
   useEffect(() => {
     if (!workspaceId || !selectedDataset) { setDetail(null); return; }
     apiRequest<DatasetDetail>("/api/v1/workspaces/" + workspaceId + "/datasets/" + selectedDataset, credentials)
-      .then(setDetail).catch((reason) => setError(reason.message));
+      .then((result) => {
+        setDetail(result);
+        setContractDraft(JSON.stringify(result.contract, null, 2));
+        setEditingContract(false);
+      }).catch((reason) => setError(reason.message));
   }, [workspaceId, selectedDataset, credentials]);
 
   const refreshRun = useCallback(async (runId: string) => {
@@ -337,11 +343,20 @@ export default function Home() {
               </section>
 
               {detail && <section className="panel">
-                <div className="panel-heading"><div><span className="eyebrow">DATASET CONTRACT</span><h3>{detail.name}</h3><p className="muted mono">{detail.urn}</p></div><span className="count-tag">Version {detail.contract_version}</span></div>
-                <div className="contract-grid">
-                  {(detail.metadata.columns||[]).map((column)=><div className="column-chip" key={column.name}><span>{column.name}</span><small>{column.type} · {column.nullable?"nullable":"required"}</small></div>)}
-                </div>
-                <div className="contract-summary"><strong>{detail.contract.constraints?.length||0} inferred constraints</strong><span>{detail.metadata.upstream_urns?.length||0} upstream dependencies</span><span>{detail.uploads.length} data uploads</span></div>
+                <div className="panel-heading"><div><span className="eyebrow">DATASET CONTRACT</span><h3>{detail.name}</h3><p className="muted mono">{detail.urn}</p></div><div className="top-actions"><span className="count-tag">Version {detail.contract_version}</span><button className="small-button" onClick={()=>setEditingContract((value)=>!value)}>{editingContract?"Cancel":"Edit contract"}</button></div></div>
+                {editingContract ? (
+                  <div className="stack">
+                    <p className="muted small-copy">Edit the contract JSON. Allowed constraint kinds: not_null, unique, referential and freshness. Referential rules must target a declared upstream URN.</p>
+                    <textarea className="contract-editor" value={contractDraft} onChange={(event)=>setContractDraft(event.target.value)} rows={12} spellCheck={false}/>
+                    <div><button className="primary-button" onClick={saveContract} disabled={busy==="contract"}>{busy==="contract"?<Loader2 className="spin" size={16}/>:<Save size={16}/>} Save new contract version</button></div>
+                  </div>
+                ) : <>
+                  <div className="contract-grid">
+                    {(detail.metadata.columns||[]).map((column)=><div className="column-chip" key={column.name}><span>{column.name}</span><small>{column.type} · {column.nullable?"nullable":"required"}</small></div>)}
+                  </div>
+                  <div className="contract-summary"><strong>{detail.contract.constraints?.length||0} constraints</strong><span>{detail.metadata.upstream_urns?.length||0} upstream dependencies</span><span>{detail.uploads.length} data uploads</span></div>
+                  {(detail.metadata.upstream_urns||[]).length>0 && <div className="upstream-list"><strong>Declared upstream datasets</strong>{detail.metadata.upstream_urns?.map((urn)=><span key={urn}><GitBranch size={13}/>{urn}</span>)}</div>}
+                </>}
               </section>}
 
               {selectedRun && <section className="panel">
