@@ -851,3 +851,29 @@ def list_audit_events(
         }
         for row in rows
     ]
+
+
+@app.get("/api/v1/workspaces/{workspace_id}/datasets/{dataset_id}/contract/versions")
+def list_contract_versions(
+    workspace_id: str,
+    dataset_id: str,
+    identity: dict[str, Any] = Depends(current_identity),
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    ensure_workspace(db, workspace_id, identity)
+    dataset = _dataset(db, workspace_id, dataset_id)
+    rows = db.scalars(
+        select(ContractVersion)
+        .where(ContractVersion.dataset_id == dataset.id)
+        .order_by(ContractVersion.version.desc())
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "version": row.version,
+            "contract": row.contract_json,
+            "created_by": row.created_by,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
