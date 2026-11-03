@@ -45,7 +45,10 @@ def test_search_and_dataset_metadata_are_normalized():
 
     client = DataHubGraphQL("https://datahub.example", token="test-token")
     client.client.close()
-    client.client = httpx.Client(transport=httpx.MockTransport(handler))
+    client.client = httpx.Client(
+        headers={"Authorization": "Bearer test-token", "Content-Type": "application/json"},
+        transport=httpx.MockTransport(handler),
+    )
     try:
         results = client.list_datasets()
         assert len(results) == 1
