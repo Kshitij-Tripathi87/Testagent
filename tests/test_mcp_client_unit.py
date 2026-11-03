@@ -35,9 +35,8 @@ async def test_execute_graphql_handles_errors():
     client._http = MagicMock()
     client._http.post = MagicMock(return_value=ctx)
 
-    result = await client._execute_graphql("query {}", {})
-    assert "errors" in result
-    assert result["errors"][0]["message"] == "Dataset not found"
+    with pytest.raises(RuntimeError, match="Dataset not found"):
+        await client._execute_graphql("query {}", {})
 
 
 @pytest.mark.asyncio
