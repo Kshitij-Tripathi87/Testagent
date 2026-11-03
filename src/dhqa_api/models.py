@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dhqa_api.db import Base
@@ -60,7 +60,7 @@ class Dataset(Base):
     connection_id: Mapped[str] = mapped_column(ForeignKey("data_connections.id", ondelete="CASCADE"), index=True)
     urn: Mapped[str] = mapped_column(String(2000), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    metadata_json: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     contract_json: Mapped[dict[str, Any]] = mapped_column(default=dict)
     contract_version: Mapped[int] = mapped_column(Integer, default=1)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -87,7 +87,7 @@ class DatasetUpload(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     row_count: Mapped[int] = mapped_column(Integer, default=0)
-    columns_json: Mapped[list[str]] = mapped_column(default=list)
+    columns_json: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
