@@ -59,6 +59,8 @@ For a hosted environment:
 - Set SUPABASE_JWKS_URL, for example https://PROJECT_REF.supabase.co/auth/v1/.well-known/jwks.json.
 - Set SUPABASE_ISSUER to https://PROJECT_REF.supabase.co/auth/v1.
 - Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY at frontend image build time.
+- Set NEXT_PUBLIC_DEV_USER to an empty value for hosted builds. The local development identity must not be baked into a production frontend.
+- Configure both SUPABASE_JWKS_URL and SUPABASE_ISSUER. The API fails closed in production if either is missing.
 - Set DATAHUB_ALLOWED_HOSTS to an explicit comma-separated host allowlist.
 - Set CORS_ORIGINS and NEXT_PUBLIC_API_URL to the deployed HTTPS origins.
 - Use a strong unique APP_ENCRYPTION_KEY, managed database, managed Redis, and a persistent upload volume or object storage adapter.
@@ -77,6 +79,7 @@ All authenticated application endpoints are under /api/v1.
 - GET /workspaces/{workspace_id}/datasets
 - GET /workspaces/{workspace_id}/datasets/{dataset_id}
 - PUT /workspaces/{workspace_id}/datasets/{dataset_id}/contract
+- GET /workspaces/{workspace_id}/datasets/{dataset_id}/contract/versions
 - POST /workspaces/{workspace_id}/datasets/{dataset_id}/uploads
 - POST /workspaces/{workspace_id}/runs, GET /workspaces/{workspace_id}/runs
 - GET /workspaces/{workspace_id}/runs/{run_id}
