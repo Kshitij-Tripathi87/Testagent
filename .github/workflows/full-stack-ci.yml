@@ -53,7 +53,6 @@ jobs:
           NEXT_PUBLIC_DEV_USER: ci-test-user
         run: npm run build
 
-
   compose:
     runs-on: ubuntu-latest
     steps:
@@ -61,5 +60,163 @@ jobs:
       - name: Validate application Compose configuration
         env:
           POSTGRES_PASSWORD: ci-only-password
-          APP_ENCRYPTION_KEY: ci-placeholder-only
+          APP_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
         run: docker compose -f infra/docker-compose.app.yml config --quiet
+
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create isolated CI environment
+        run: |
+          python - <<'PY'
+          import base64
+          import os
+
+          key = base64.urlsafe_b64encode(os.urandom(32)).decode("ascii")
+          with open(".env", "w", encoding="utf-8") as env:
+              env.write("APP_ENV=development\n")
+              env.write("POSTGRES_PASSWORD=ci-only-password\n")
+              env.write(f"APP_ENCRYPTION_KEY={key}\n")
+              env.write("DEV_AUTH_ENABLED=true\n")
+              env.write("NEXT_PUBLIC_DEV_USER=ci-smoke-user\n")
+              env.write("NEXT_PUBLIC_API_URL=http://localhost:8000\n")
+              env.write("CORS_ORIGINS=http://localhost:3000\n")
+          PY
+      - name: Build and start the complete stack
+        run: docker compose --env-file .env -f infra/docker-compose.app.yml up --build -d
+      - name: Wait for API, database, Redis and frontend
+        run: |
+          set -eu
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://localhost:8000/readyz >/dev/null \
+              && curl --silent --fail http://localhost:3000/ >/dev/null; then
+              echo "API, database, Redis and frontend are responding."
+              exit 0
+            fi
+            sleep 3
+          done
+          docker compose --env-file .env -f infra/docker-compose.app.yml ps
+          docker compose --env-file .env -f infra/docker-compose.app.yml logs --no-color api postgres redis web
+          exit 1
+      - name: Execute an API-to-worker quality-run smoke test
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+          import time
+          import urllib.error
+          import urllib.request
+
+          base = "http://127.0.0.1:8000"
+          headers = {"X-Dev-User": "ci-smoke-user", "Content-Type": "application/json"}
+
+          def request(path, method="GET", payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+              with urllib.request.urlopen(req, timeout=15) as response:
+                  body = response.read()
+                  return json.loads(body) if body else None
+
+          workspace = request("/api/v1/workspaces", "POST", {"name": "CI runtime smoke"})
+          workspace_id = workspace["id"]
+
+          seed = r'''
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+          from dhqa_api.db import SessionLocal
+          from dhqa_api.models import DataConnection, Dataset, DatasetUpload
+
+          workspace_id = sys.argv[1]
+          urn = "urn:li:dataset:(urn:li:dataPlatform:snowflake,ci.smoke_orders,PROD)"
+          root = Path("/app/var/uploads") / workspace_id / "ci-smoke"
+          root.mkdir(parents=True, exist_ok=True)
+          csv_path = root / "orders.csv"
+          content = b"id\\n\\n2\\n"
+          csv_path.write_bytes(content)
+
+          with SessionLocal() as db:
+              connection = DataConnection(
+                  workspace_id=workspace_id,
+                  name="CI fixture catalog",
+                  gms_url="http://datahub.invalid",
+                  token_ciphertext="",
+              )
+              db.add(connection)
+              db.flush()
+              dataset = Dataset(
+                  workspace_id=workspace_id,
+                  connection_id=connection.id,
+                  urn=urn,
+                  name="ci_smoke_orders",
+                  metadata_json={
+                      "columns": [{"name": "id", "type": "string", "nullable": False}],
+                      "owners": [],
+                      "upstream_urns": [],
+                  },
+                  contract_json={
+                      "urn": urn,
+                      "name": "ci_smoke_orders",
+                      "columns": [{"name": "id", "type": "string", "nullable": False}],
+                      "owners": [],
+                      "upstream_urns": [],
+                      "constraints": [{"kind": "not_null", "column": "id"}],
+                      "primary_key_columns": ["id"],
+                      "timestamp_column": None,
+                      "max_staleness_hours": 24,
+                  },
+              )
+              db.add(dataset)
+              db.flush()
+              upload = DatasetUpload(
+                  dataset_id=dataset.id,
+                  file_name="orders.csv",
+                  storage_path=str(csv_path),
+                  size_bytes=len(content),
+                  sha256=hashlib.sha256(content).hexdigest(),
+                  row_count=2,
+                  columns_json=["id"],
+                  created_by="ci-smoke-user",
+              )
+              db.add(upload)
+              db.commit()
+              print(json.dumps({"dataset_id": dataset.id, "upload_id": upload.id}))
+          '''
+          completed = subprocess.run(
+              ["docker", "compose", "--env-file", ".env", "-f", "infra/docker-compose.app.yml",
+               "exec", "-T", "api", "python", "-c", seed, workspace_id],
+              check=True, capture_output=True, text=True,
+          )
+          seeded = json.loads(completed.stdout.strip().splitlines()[-1])
+
+          run = request(
+              f"/api/v1/workspaces/{workspace_id}/runs",
+              "POST",
+              {"dataset_id": seeded["dataset_id"], "upload_id": seeded["upload_id"]},
+          )
+          run_id = run["id"]
+          for _ in range(60):
+              current = request(f"/api/v1/workspaces/{workspace_id}/runs/{run_id}")
+              if current["status"] in {"completed", "failed"}:
+                  break
+              time.sleep(2)
+          else:
+              raise SystemExit("Timed out waiting for the RQ worker to complete the smoke run")
+
+          assert current["status"] == "completed", current
+          assert current["passed"] is False, current
+          assert current["summary"]["failed_checks"] == 1, current
+          assert len(current["checks"]) == 1, current
+          assert len(current["incidents"]) == 1, current
+          assert len(current["artifacts"]) >= 6, current
+          print("API -> PostgreSQL -> Redis/RQ worker -> quality checks -> incident/artifacts: PASS")
+          PY
+      - name: Print service logs on failure
+        if: failure()
+        run: docker compose --env-file .env -f infra/docker-compose.app.yml logs --no-color
+      - name: Stop the complete stack
+        if: always()
+        run: docker compose --env-file .env -f infra/docker-compose.app.yml down -v
