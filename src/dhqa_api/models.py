@@ -61,7 +61,7 @@ class Dataset(Base):
     urn: Mapped[str] = mapped_column(String(2000), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    contract_json: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    contract_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     contract_version: Mapped[int] = mapped_column(Integer, default=1)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -72,7 +72,7 @@ class ContractVersion(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), index=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
-    contract_json: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    contract_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -101,7 +101,7 @@ class QualityRun(Base):
     upload_id: Mapped[str] = mapped_column(ForeignKey("dataset_uploads.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
     passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    summary_json: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -130,7 +130,7 @@ class Incident(Base):
     run_id: Mapped[str] = mapped_column(ForeignKey("quality_runs.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="open")
-    details_json: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    details_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
