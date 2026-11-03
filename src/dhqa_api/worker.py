@@ -14,6 +14,7 @@ from dhqa.lineage_tracer import RootCauseReport
 from dhqa.pr_description import render_pr_description
 from dhqa.smart_codegen import to_smart_dbt_model
 from dhqa.test_generator import CheckResult, generate_pytest_module, run_checks
+from dhqa.urn_utils import safe_name
 from dhqa_api.config import settings
 from dhqa_api.contracts import contract_from_dict
 from dhqa_api.db import SessionLocal
@@ -233,11 +234,12 @@ def execute_quality_run(run_id: str) -> dict[str, Any]:
                     render_incident_report(root_report, contract=contract, all_results=results),
                 )
 
+            artifact_model_name = safe_name(contract.name) or "dataset"
             generated = [
-                ("dbt_sql", f"{contract.name}.sql", to_dbt_model(contract)),
+                ("dbt_sql", f"{artifact_model_name}.sql", to_dbt_model(contract)),
                 ("dbt_schema", "schema.yml", to_schema_yml(contract)),
-                ("smart_dbt_sql", f"{contract.name}_smart.sql", to_smart_dbt_model(contract)),
-                ("pytest", f"test_{contract.name}.py", generate_pytest_module(contract)),
+                ("smart_dbt_sql", f"{artifact_model_name}_smart.sql", to_smart_dbt_model(contract)),
+                ("pytest", f"test_{artifact_model_name}.py", generate_pytest_module(contract)),
                 ("pr_description", "PR_DESCRIPTION.md", render_pr_description(contract)),
             ]
             for kind, file_name, content in generated:
