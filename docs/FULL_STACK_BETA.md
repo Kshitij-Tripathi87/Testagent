@@ -10,6 +10,7 @@ This branch adds a web application around the existing Python DHQA engine. The C
 - PostgreSQL-compatible SQLAlchemy models and an initial Alembic migration.
 - Fernet encryption for DataHub personal access tokens at rest.
 - DataHub GraphQL metadata search, dataset retrieval and catalog sync.
+- Optional, best-effort DataHub assertion and incident writeback using the existing async GraphQL client. It is disabled by default and can be enabled with DATAHUB_WRITEBACK_ENABLED=true after granting mutation permissions.
 - CSV upload validation, configurable size and row limits, catalog-column matching and SHA-256 metadata.
 - Redis/RQ background execution using the existing contract engine.
 - Persistent quality results, incident evidence, generated SQL/schema/pytest/PR artifacts.
@@ -62,6 +63,7 @@ For a hosted environment:
 - Set NEXT_PUBLIC_DEV_USER to an empty value for hosted builds. The local development identity must not be baked into a production frontend.
 - Configure both SUPABASE_JWKS_URL and SUPABASE_ISSUER. The API fails closed in production if either is missing.
 - Set DATAHUB_ALLOWED_HOSTS to an explicit comma-separated host allowlist.
+- Enable DATAHUB_WRITEBACK_ENABLED=true only after confirming the DataHub token can create/update assertions and incidents.
 - Set CORS_ORIGINS and NEXT_PUBLIC_API_URL to the deployed HTTPS origins.
 - Use a strong unique APP_ENCRYPTION_KEY, managed database, managed Redis, and a persistent upload volume or object storage adapter.
 - Restrict Supabase sign-up/invitation policy to the intended beta cohort.
@@ -126,7 +128,7 @@ Set the required environment variables in the repository-root .env. For a local 
 - The dashboard is a first vertical slice, not a complete set of separately routed catalog, contract, lineage and incident workspaces.
 - Contract history is persisted, but a dedicated history/restore UI is not yet included.
 - RQ jobs have durable run records, but cancellation, user-configured retry policies and scheduled runs are not implemented.
-- DataHub assertions/incident writeback is not part of the application worker's initial execution path; results and incidents are persisted in Testagent.
+- DataHub assertion/incident writeback is implemented as an opt-in worker step. Testagent always persists local evidence first; an external writeback failure is recorded in the run summary and does not discard the quality result. Validate mutation permissions against a real DataHub instance before enabling it.
 - Supabase magic-link sign-in is implemented; production invitation policy and organization lifecycle need configuration.
 - The initial Alembic revision creates the initial schema from SQLAlchemy metadata. Future schema changes should use explicit Alembic operations and migrations.
 - A real DataHub deployment must be used to validate GraphQL schema compatibility, authentication and lineage response semantics before inviting external testers.
