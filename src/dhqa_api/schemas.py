@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class WorkspaceCreate(BaseModel):
@@ -26,6 +26,16 @@ class ConstraintInput(BaseModel):
     column: str | None = Field(default=None, max_length=255)
     ref_urn: str | None = Field(default=None, max_length=2000)
     max_staleness_hours: int | None = Field(default=None, ge=1, le=720)
+
+    @model_validator(mode="after")
+    def validate_constraint(self):
+        if self.kind in {"not_null", "unique", "referential", "freshness"} and not self.column:
+            raise ValueError("This constraint requires a column")
+        if self.kind == "referential" and not self.ref_urn:
+            raise ValueError("Referential constraints require ref_urn")
+        if self.kind == "freshness" and not self.max_staleness_hours:
+            raise ValueError("Freshness constraints require max_staleness_hours")
+        return self
 
 
 class ContractUpdate(BaseModel):
