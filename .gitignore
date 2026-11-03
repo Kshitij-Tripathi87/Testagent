@@ -17,3 +17,12 @@ data/customer_ltv_features.csv
 data/raw_orders.csv
 data/stg_orders.csv
 data/fact_orders.csv
+
+# Full-stack application local state and secrets
+.env.*
+!.env.example
+!infra/.env.example
+web/node_modules/
+web/.next/
+web/next-env.d.ts
+var/
