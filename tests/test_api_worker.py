@@ -45,6 +45,13 @@ def test_worker_persists_failed_checks_incident_lineage_and_artifacts(tmp_path, 
     Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(worker, "SessionLocal", TestingSession)
     monkeypatch.setattr(worker.settings, "max_lineage_hops", 5)
+    monkeypatch.setattr(worker.settings, "datahub_writeback_enabled", True)
+    writeback_calls = []
+
+    def fake_writeback(connection, dataset, results, reports):
+        writeback_calls.append((connection.id, dataset.urn, results, reports))
+
+    monkeypatch.setattr(worker, "_writeback_to_datahub", fake_writeback)
 
     workspace_urn = "urn:li:dataset:(urn:li:dataPlatform:snowflake,raw.parent,PROD)"
     child_urn = "urn:li:dataset:(urn:li:dataPlatform:snowflake,marts.child,PROD)"
@@ -139,6 +146,7 @@ def test_worker_persists_failed_checks_incident_lineage_and_artifacts(tmp_path, 
             assert persisted_run is not None
             assert persisted_run.status == "completed"
             assert persisted_run.passed is False
+            assert persisted_run.summary_json["writeback"]["status"] == "succeeded"
 
             checks = db.scalars(
                 select(CheckResultRow).where(CheckResultRow.run_id == run_id)
@@ -160,6 +168,11 @@ def test_worker_persists_failed_checks_incident_lineage_and_artifacts(tmp_path, 
             assert any(item.kind == "incident_report" for item in artifacts)
             assert any(item.kind == "dbt_sql" for item in artifacts)
             assert all(item.content for item in artifacts)
+
+        assert len(writeback_calls) == 1
+        assert writeback_calls[0][1] == child_urn
+        assert len(writeback_calls[0][2]) == 1
+        assert len(writeback_calls[0][3]) == 1
 
         repeated = worker.execute_quality_run(run_id)
         assert repeated["idempotent"] is True
