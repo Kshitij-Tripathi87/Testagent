@@ -25,6 +25,7 @@ from dhqa_api.db import Base, engine, get_db
 from dhqa_api.encryption import decrypt_secret, encrypt_secret
 from dhqa_api.integrations.datahub import DataHubGraphQL
 from dhqa_api.models import (
+    AuditEvent,
     CheckResultRow,
     ContractVersion,
     DataConnection,
@@ -69,6 +70,27 @@ def startup() -> None:
 
 def identity_subject(identity: dict[str, Any]) -> str:
     return str(identity["sub"])
+
+
+def record_audit(
+    db: Session,
+    workspace_id: str,
+    identity: dict[str, Any],
+    action: str,
+    target_type: str,
+    target_id: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    db.add(
+        AuditEvent(
+            workspace_id=workspace_id,
+            actor_subject=identity_subject(identity),
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            details_json=details or {},
+        )
+    )
 
 
 def ensure_workspace(db: Session, workspace_id: str, identity: dict[str, Any]) -> Workspace:
@@ -222,6 +244,7 @@ def create_workspace(
             role="owner",
         )
     )
+    record_audit(db, workspace.id, identity, "workspace.created", "workspace", workspace.id)
     db.commit()
     return {"id": workspace.id, "name": workspace.name, "role": "owner"}
 
@@ -264,6 +287,11 @@ def create_connection(
         token_ciphertext=encrypted_token,
     )
     db.add(connection)
+    db.flush()
+    record_audit(
+        db, workspace_id, identity, "connection.created", "data_connection", connection.id,
+        {"name": connection.name, "gms_host": urlsplit(connection.gms_url).hostname},
+    )
     db.commit()
     return {
         "id": connection.id,
@@ -401,6 +429,10 @@ def sync_catalog(
             synced += 1
         connection.status = "connected"
         connection.last_tested_at = utcnow()
+        record_audit(
+            db, workspace_id, identity, "catalog.synced", "data_connection", connection.id,
+            {"dataset_count": synced},
+        )
         db.commit()
         return {"synced": synced, "datasets": len(metadata_items)}
     except Exception as exc:
@@ -503,6 +535,10 @@ def update_contract(
             created_by=identity_subject(identity),
         )
     )
+    record_audit(
+        db, workspace_id, identity, "contract.updated", "dataset", dataset.id,
+        {"version": dataset.contract_version, "constraint_count": len(normalized)},
+    )
     db.commit()
     return {"dataset_id": dataset.id, "version": dataset.contract_version, "contract": payload}
 
@@ -553,6 +589,10 @@ async def upload_dataset_csv(
         created_by=identity_subject(identity),
     )
     db.add(upload)
+    record_audit(
+        db, workspace_id, identity, "dataset.uploaded", "dataset", dataset.id,
+        {"upload_id": upload.id, "size_bytes": upload.size_bytes, "row_count": upload.row_count},
+    )
     db.commit()
     return {
         "id": upload.id,
@@ -589,6 +629,11 @@ def create_quality_run(
         created_by=identity_subject(identity),
     )
     db.add(run)
+    db.flush()
+    record_audit(
+        db, workspace_id, identity, "quality_run.queued", "quality_run", run.id,
+        {"dataset_id": dataset.id, "upload_id": upload.id},
+    )
     db.commit()
     try:
         queue = Queue("testagent", connection=Redis.from_url(settings.redis_url))
@@ -716,6 +761,10 @@ def update_incident(
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     incident.status = body.status
+    record_audit(
+        db, workspace_id, identity, "incident.status_changed", "incident", incident.id,
+        {"status": incident.status},
+    )
     db.commit()
     return {"id": incident.id, "status": incident.status}
 
@@ -751,3 +800,31 @@ def workspace_overview(
         "open_incidents": open_incidents,
         "recent_runs": [_run_response(db, item, include_details=False) for item in latest],
     }
+
+
+@app.get("/api/v1/workspaces/{workspace_id}/audit")
+def list_audit_events(
+    workspace_id: str,
+    limit: int = 100,
+    identity: dict[str, Any] = Depends(current_identity),
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    ensure_workspace(db, workspace_id, identity)
+    rows = db.scalars(
+        select(AuditEvent)
+        .where(AuditEvent.workspace_id == workspace_id)
+        .order_by(AuditEvent.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "actor_subject": row.actor_subject,
+            "action": row.action,
+            "target_type": row.target_type,
+            "target_id": row.target_id,
+            "details": row.details_json,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
