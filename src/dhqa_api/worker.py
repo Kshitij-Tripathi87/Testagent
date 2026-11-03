@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,9 @@ from dhqa.smart_codegen import to_smart_dbt_model
 from dhqa.test_generator import CheckResult, generate_pytest_module, run_checks
 from dhqa.urn_utils import safe_name
 from dhqa_api.config import settings
+from dhqa_api.encryption import decrypt_secret
+from dhqa.mcp_client import DataHubMCPClient
+from dhqa.writeback import write_check_result, write_incident
 from dhqa_api.contracts import contract_from_dict
 from dhqa_api.db import SessionLocal
 from dhqa_api.models import (
@@ -167,6 +171,31 @@ def _save_artifact(db, run_id: str, kind: str, file_name: str, content: str) -> 
     )
 
 
+
+def _writeback_to_datahub(
+    connection: DataConnection,
+    dataset: Dataset,
+    results: list[CheckResult],
+    reports: list[RootCauseReport],
+) -> None:
+    """Publish checks and traced incidents through DataHub's GraphQL API.
+
+    This is deliberately opt-in. The local result is committed first so a
+    missing DataHub write permission never discards the quality-run evidence.
+    """
+    async def _publish() -> None:
+        async with DataHubMCPClient(
+            gms_url=connection.gms_url,
+            token=decrypt_secret(connection.token_ciphertext),
+            transport="graphql",
+        ) as client:
+            for result in results:
+                await write_check_result(client, dataset.urn, result)
+            for report in reports:
+                await write_incident(client, dataset.urn, report)
+
+    asyncio.run(_publish())
+
 def execute_quality_run(run_id: str) -> dict[str, Any]:
     """RQ entrypoint. All work is executed outside the HTTP request process."""
     with SessionLocal() as db:
@@ -206,6 +235,7 @@ def execute_quality_run(run_id: str) -> dict[str, Any]:
                 )
 
             incidents: list[dict[str, Any]] = []
+            root_reports: list[RootCauseReport] = []
             for result in results:
                 if result.passed:
                     continue
@@ -226,6 +256,7 @@ def execute_quality_run(run_id: str) -> dict[str, Any]:
                     hop_distance=report["hop_distance"],
                     trace=[hop for hop in report["trace"] if hop.get("checked")],
                 )
+                root_reports.append(root_report)
                 _save_artifact(
                     db,
                     run.id,
@@ -259,7 +290,24 @@ def execute_quality_run(run_id: str) -> dict[str, Any]:
                 "completed_at": datetime.now(timezone.utc).isoformat(),
             }
             run.finished_at = utcnow()
+            run.summary_json = {**run.summary_json, "writeback": {"status": "disabled"}}
             db.commit()
+
+            if settings.datahub_writeback_enabled:
+                try:
+                    connection = db.get(DataConnection, dataset.connection_id)
+                    if not connection:
+                        raise RuntimeError("Dataset DataHub connection is no longer available")
+                    _writeback_to_datahub(connection, dataset, results, root_reports)
+                    writeback_result = {"status": "succeeded"}
+                except Exception as writeback_exc:
+                    writeback_result = {
+                        "status": "failed",
+                        "error": str(writeback_exc)[:1000],
+                    }
+                run.summary_json = {**run.summary_json, "writeback": writeback_result}
+                db.commit()
+
             return {"run_id": run.id, "status": run.status, **run.summary_json}
         except Exception as exc:
             db.rollback()
