@@ -169,3 +169,6 @@ input:focus,select:focus { border-color:#5bbf9c; box-shadow:0 0 0 3px #5bbf9c20;
 .version-history>strong { font-size:11px; color:#cdd9e8; }
 .version-row { display:grid; grid-template-columns:45px minmax(0,1fr) auto; gap:10px; align-items:center; border-top:1px solid #253449; padding-top:8px; font-size:10px; color:#aebed1; }
 .version-row small { color:#7d91aa; font-size:9px; }
+
+.writeback-row { display:flex; align-items:center; flex-wrap:wrap; gap:9px; border:1px solid #28394f; background:#0c1624; border-radius:8px; padding:10px 12px; font-size:10px; color:#a7b8cd; margin:-4px 0 13px; }
+.writeback-row small { flex:1 1 100%; color:#ffadad; overflow-wrap:anywhere; }
