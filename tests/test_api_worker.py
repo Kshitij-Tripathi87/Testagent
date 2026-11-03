@@ -175,12 +175,15 @@ def test_worker_persists_failed_checks_incident_lineage_and_artifacts(tmp_path, 
         assert len(writeback_calls[0][3]) == 1
 
         with TestingSession() as db:
+            workspace = db.scalar(select(Workspace))
+            retry_upload = db.scalar(
+                select(DatasetUpload).where(DatasetUpload.dataset_id == child_dataset_id)
+            )
+            assert workspace is not None and retry_upload is not None
             retry_run = QualityRun(
-                workspace_id=next(iter(db.scalars(select(Workspace))).id for _ in [0]),
+                workspace_id=workspace.id,
                 dataset_id=child_dataset_id,
-                upload_id=db.scalar(
-                    select(DatasetUpload).where(DatasetUpload.dataset_id == child_dataset_id)
-                ).id,
+                upload_id=retry_upload.id,
                 status="queued",
                 created_by="tester",
             )
