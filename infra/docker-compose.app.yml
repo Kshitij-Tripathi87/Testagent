@@ -42,6 +42,8 @@ services:
       DEV_AUTH_ENABLED: \${DEV_AUTH_ENABLED:-true}
       CORS_ORIGINS: \${CORS_ORIGINS:-http://localhost:3000}
       DATAHUB_ALLOWED_HOSTS: \${DATAHUB_ALLOWED_HOSTS:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["sh", "-c", "alembic upgrade head && uvicorn dhqa_api.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
@@ -58,6 +60,8 @@ services:
     build:
       context: ..
       dockerfile: infra/Dockerfile.api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["rq", "worker", "--url", "redis://redis:6379/0", "testagent"]
     environment:
       APP_ENV: \${APP_ENV:-development}

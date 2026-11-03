@@ -177,3 +177,17 @@ See `PLAN.md` for the day-by-day build plan.
 ## License
 
 Apache 2.0 — see `LICENSE`.
+
+
+---
+
+## Full-stack web application (beta foundation)
+
+The repository now also contains a FastAPI + PostgreSQL + Redis/RQ backend and a Next.js web application around the existing DHQA engine.
+
+- [Full-stack beta setup and deployment guide](docs/FULL_STACK_BETA.md)
+- Application API: \`src/dhqa_api/\`
+- Web frontend: \`web/\`
+- App Docker Compose: \`infra/docker-compose.app.yml\`
+
+The current beta execution mode combines live DataHub metadata with uploaded CSV row data. Warehouse query adapters and DataHub assertion/incident writeback remain follow-on work; see the beta guide for operational and security limitations.

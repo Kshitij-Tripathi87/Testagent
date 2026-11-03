@@ -1,3 +1,7 @@
+import pytest
+
+pytest.importorskip("pydantic_settings")
+
 from dhqa_api.contracts import contract_from_dict, contract_from_metadata, contract_to_dict
 
 
@@ -32,3 +36,10 @@ def test_contract_override_preserves_explicit_constraints():
     assert len(restored.constraints) == 1
     assert restored.constraints[0].kind == "not_null"
     assert restored.constraints[0].column == "customer_id"
+
+
+def test_empty_contract_is_not_replaced_by_inferred_constraints():
+    payload = contract_to_dict(contract_from_metadata(sample_metadata()))
+    payload["constraints"] = []
+    restored = contract_from_dict(payload)
+    assert restored.constraints == []

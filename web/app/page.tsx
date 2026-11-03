@@ -50,7 +50,7 @@ export default function Home() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [selectedRun, setSelectedRun] = useState<Run | null>(null);
   const [connectionName, setConnectionName] = useState("Production DataHub");
-  const [gmsUrl, setGmsUrl] = useState("http://localhost:8080");
+  const [gmsUrl, setGmsUrl] = useState("http://host.docker.internal:8080");
   const [token, setToken] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState("");
